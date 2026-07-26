@@ -1,0 +1,72 @@
+[
+  {
+    "id": "eval-1",
+    "query": "How do I initialize my workspace domain and generate API keys?",
+    "groundTruthAnswer": "Click Create Organization, pick a unique domain slug, then go to Settings > API Access Keys to generate secret tokens.",
+    "expectedDocument": "quickstart-guide.txt",
+    "expectedKeywords": ["organization", "slug", "api access keys", "bearer"]
+  },
+  {
+    "id": "eval-2",
+    "query": "What HTTP header must be passed for API authentication?",
+    "groundTruthAnswer": "Pass your key as a Bearer token in the Authorization header: Authorization: Bearer <API_KEY>.",
+    "expectedDocument": "api-auth-spec.txt",
+    "expectedKeywords": ["authorization", "bearer", "content-type"]
+  },
+  {
+    "id": "eval-3",
+    "query": "What happens when rate limits are exceeded?",
+    "groundTruthAnswer": "The API responds with HTTP 429 Too Many Requests containing a retry_after_seconds field.",
+    "expectedDocument": "api-auth-spec.txt",
+    "expectedKeywords": ["429", "too many requests", "rate limit"]
+  },
+  {
+    "id": "eval-4",
+    "query": "What are the SAML ACS URL and Entity ID for Okta SSO?",
+    "groundTruthAnswer": "ACS URL is https://auth.novabase.io/saml/acs and Entity ID is urn:novabase:sp:auth.",
+    "expectedDocument": "saml-sso-guide.txt",
+    "expectedKeywords": ["acs url", "entity id", "assertion consumer"]
+  },
+  {
+    "id": "eval-5",
+    "query": "How are mid-cycle user seats billed?",
+    "groundTruthAnswer": "Mid-cycle seat additions incur a prorated charge, while removed seats apply account credit.",
+    "expectedDocument": "billing-policy.txt",
+    "expectedKeywords": ["prorated", "credit", "billing cycle"]
+  },
+  {
+    "id": "eval-6",
+    "query": "How do I verify webhook payloads from NovaBase?",
+    "groundTruthAnswer": "Verify the HMAC SHA-256 signature passed in the X-Nova-Signature header against your secret.",
+    "expectedDocument": "webhooks-guide.txt",
+    "expectedKeywords": ["hmac", "sha256", "x-nova-signature"]
+  },
+  {
+    "id": "eval-7",
+    "query": "How do I resolve CORS origin blocked errors?",
+    "groundTruthAnswer": "Add your domain in Admin > Portal Settings > Allowed Widget Domains including protocol scheme.",
+    "expectedDocument": "cors-troubleshooting.txt",
+    "expectedKeywords": ["allowed widget domains", "preflight", "options"]
+  },
+  {
+    "id": "eval-8",
+    "query": "What role permissions are available for workspace members?",
+    "groundTruthAnswer": "Admin (full control), Editor (can publish and edit), and Viewer (read-only access).",
+    "expectedDocument": "quickstart-guide.txt",
+    "expectedKeywords": ["admin", "editor", "viewer"]
+  },
+  {
+    "id": "eval-9",
+    "query": "What is the Pro plan request rate limit?",
+    "groundTruthAnswer": "600 requests per minute with a burst allowance of 50 req/sec.",
+    "expectedDocument": "api-auth-spec.txt",
+    "expectedKeywords": ["600", "pro", "burst"]
+  },
+  {
+    "id": "eval-10",
+    "query": "Where can past invoice PDFs be downloaded?",
+    "groundTruthAnswer": "Navigate to Admin > Billing > Invoice History and click Download PDF.",
+    "expectedDocument": "billing-policy.txt",
+    "expectedKeywords": ["invoice history", "pdf", "vat"]
+  }
+]
