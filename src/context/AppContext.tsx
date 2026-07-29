@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { processDocumentIngestion } from '../lib/ingestion/pipeline';
 import { performHybridSearch, RetrievalResult, globalVectorIndex } from '../lib/rag/hybrid-retrieval';
+import { dbApi } from '../lib/api';
+import { isSupabaseConfigured } from '../lib/supabase';
 
 export type UserRole = 'owner' | 'editor' | 'viewer';
 export type AppScreen = 'workspaces' | 'chat' | 'documents' | 'settings' | 'billing';
@@ -138,6 +140,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [workspaces]);
 
+  // Load workspaces from Supabase on mount if configured
+  useEffect(() => {
+    const initData = async () => {
+      if (isSupabaseConfigured) {
+        const dbWorkspaces = await dbApi.getWorkspaces();
+        if (dbWorkspaces.length > 0) {
+          setWorkspaces(dbWorkspaces);
+          setActiveWorkspaceState(dbWorkspaces[0]);
+        }
+      }
+    };
+    initData();
+  }, []);
+
   // Compute workspace counts dynamically based on actual arrays
   const enrichedWorkspaces = workspaces.map(ws => {
     const wsDocs = documents.filter(d => d.workspaceId === ws.id);
@@ -156,13 +172,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     : null;
 
   // ── Workspace CRUD ──────────────────────────────────────────────────
-  const addWorkspace = (name: string, description?: string) => {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    const newWs: Workspace = {
+  const addWorkspace = async (name: string, description?: string) => {
+    const createdWs = await dbApi.createWorkspace(name, description);
+    const newWs: Workspace = createdWs || {
       id: `ws-${Date.now()}`,
       name,
       description: description || '',
-      slug,
+      slug: name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
       role: 'owner',
       tier: 'free',
       updatedAt: 'Just now',
