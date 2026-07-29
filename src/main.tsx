@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { LandingPage } from './pages/LandingPage';
 import { AuthPage } from './pages/AuthPage';
 import { PricingPage } from './pages/PricingPage';
@@ -17,8 +18,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/pricing" element={<PricingPage />} />
 
-          <Route path="/app" element={<AppDashboard />} />
-          <Route path="/app/*" element={<AppDashboard />} />
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <AppDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/*"
+            element={
+              <ProtectedRoute>
+                <AppDashboard />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

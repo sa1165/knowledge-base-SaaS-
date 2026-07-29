@@ -7,7 +7,7 @@ type Tab = 'login' | 'register';
 
 export const AuthPage: React.FC = () => {
   const navigate = useNavigate();
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  const { user, signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
   
   const [tab, setTab] = useState<Tab>('login');
   const [email, setEmail] = useState('');
@@ -17,6 +17,13 @@ export const AuthPage: React.FC = () => {
   const [showPass, setShowPass] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Redirect if already authenticated
+  React.useEffect(() => {
+    if (user) {
+      navigate('/app', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,12 +41,15 @@ export const AuthPage: React.FC = () => {
           navigate('/app');
         }
       } else {
-        const { error } = await signUpWithEmail(email, password, name.trim() || email.split('@')[0]);
+        const { data, error } = await signUpWithEmail(email, password, name.trim() || email.split('@')[0]);
         if (error) {
           setErrorMsg(error.message);
+        } else if (data?.session) {
+          setSuccessMsg('Account created successfully! Redirecting...');
+          setTimeout(() => navigate('/app'), 800);
         } else {
-          setSuccessMsg('Account created successfully! Checking session...');
-          setTimeout(() => navigate('/app'), 1000);
+          setSuccessMsg('Account created! Please check your email to verify or proceed to Sign In.');
+          setTab('login');
         }
       }
     } catch (err: any) {

@@ -7,7 +7,7 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUpWithEmail: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
+  signUpWithEmail: (email: string, password: string, name: string) => Promise<{ data: any; error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
@@ -52,16 +52,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signUpWithEmail = async (email: string, password: string, name: string) => {
     if (!isSupabaseConfigured || !supabase) {
-      return { error: new Error('Supabase is not configured.') };
+      return { error: new Error('Supabase is not configured.'), data: null };
     }
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { name, full_name: name },
       },
     });
-    return { error };
+    return { data, error };
   };
 
   const signInWithGoogle = async () => {
