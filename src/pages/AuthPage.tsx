@@ -36,7 +36,11 @@ export const AuthPage: React.FC = () => {
       if (tab === 'login') {
         const { error } = await signInWithEmail(email, password);
         if (error) {
-          setErrorMsg(error.message);
+          if (error.message.toLowerCase().includes('email not confirmed')) {
+            setErrorMsg('Email address not confirmed. For security purposes, please check your inbox and click the verification link before logging in.');
+          } else {
+            setErrorMsg(error.message);
+          }
         } else {
           navigate('/app');
         }
@@ -48,7 +52,7 @@ export const AuthPage: React.FC = () => {
           setSuccessMsg('Account created successfully! Redirecting...');
           setTimeout(() => navigate('/app'), 800);
         } else {
-          setSuccessMsg('Account created! Please check your email to verify or proceed to Sign In.');
+          setSuccessMsg('Account created successfully! For security purposes, we sent a verification link to your email. Please confirm your email before logging in.');
           setTab('login');
         }
       }
