@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Sparkles, Users, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import Splash from '../components/Splash';
 
 type Tab = 'login' | 'register';
 
@@ -17,11 +18,14 @@ export const AuthPage: React.FC = () => {
   const [showPass, setShowPass] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [showSplash, setShowSplash] = useState(false);
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated — show splash for 2s first
   React.useEffect(() => {
     if (user) {
-      navigate('/app', { replace: true });
+      setShowSplash(true);
+      const t = setTimeout(() => navigate('/app', { replace: true }), 2000);
+      return () => clearTimeout(t);
     }
   }, [user, navigate]);
 
@@ -73,6 +77,10 @@ export const AuthPage: React.FC = () => {
     }
   };
 
+  if (showSplash) {
+    return <Splash />;
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: '#fbfbfa', overflowX: 'hidden' }}>
 
@@ -102,7 +110,7 @@ export const AuthPage: React.FC = () => {
             </svg>
           </div>
           <span className="font-serif" style={{ fontWeight: 700, fontSize: 20, color: '#ffffff', letterSpacing: '-0.01em' }}>
-            DocMind
+            Docly
           </span>
         </div>
 
@@ -146,7 +154,7 @@ export const AuthPage: React.FC = () => {
 
         {/* Bottom */}
         <div style={{ fontSize: 12, color: '#5e5e62' }}>
-          © 2026 DocMind Inc. All rights reserved.
+          © 2026 Docly Inc. All rights reserved.
         </div>
 
       </div>
@@ -171,7 +179,7 @@ export const AuthPage: React.FC = () => {
                 <path d="M7 7h10M7 12h10M7 17h10" />
               </svg>
             </div>
-            <span className="font-serif" style={{ fontWeight: 700, fontSize: 17, color: '#16161a' }}>DocMind</span>
+            <span className="font-serif" style={{ fontWeight: 700, fontSize: 17, color: '#16161a' }}>Docly</span>
           </div>
         </div>
 

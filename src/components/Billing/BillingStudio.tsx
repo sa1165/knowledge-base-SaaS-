@@ -133,7 +133,7 @@ export const BillingStudio: React.FC = () => {
             Contact us for enterprise pricing — unlimited workspaces, custom SLA, SAML SSO, and dedicated infrastructure.
           </p>
         </div>
-        <a href="mailto:hello@docmind.ai" style={{
+        <a href="mailto:hello@docly.ai" style={{
           display: 'inline-flex', alignItems: 'center', gap: 8,
           background: '#ffffff', color: '#16161a', textDecoration: 'none',
           borderRadius: 8, padding: '11px 20px', fontSize: 13, fontWeight: 700, flexShrink: 0

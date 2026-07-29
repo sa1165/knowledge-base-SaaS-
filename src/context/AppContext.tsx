@@ -119,7 +119,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Current user — derived from Supabase Auth session, with local fallback
-  const currentUser = { name: 'User', email: 'user@docmind.ai' };
+  const currentUser = { name: 'User', email: 'user@docly.ai' };
 
   // Safe active workspace setter
   const setActiveWorkspace = (ws: Workspace) => {

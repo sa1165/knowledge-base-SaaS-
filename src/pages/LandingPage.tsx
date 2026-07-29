@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
+import {
   Sparkles, 
   ArrowRight, 
   UploadCloud, 
@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Check
 } from 'lucide-react';
+import ThreeDCard from '../components/ThreeDCard';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -45,7 +46,7 @@ export const LandingPage: React.FC = () => {
               </svg>
             </div>
             <span className="font-serif" style={{ fontWeight: 700, fontSize: 20, color: '#16161a', letterSpacing: '-0.01em' }}>
-              DocMind
+              Docly
             </span>
           </div>
 
@@ -136,8 +137,9 @@ export const LandingPage: React.FC = () => {
 
           {/* Hero Visual - Premium Mock Chat */}
           <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <ThreeDCard>
             <div style={{
-              background: '#f4f4f3', border: '1px solid #e2e2e0', borderRadius: 16,
+              background: '#f4f4f3', border: '1px solid #e2e0e0', borderRadius: 16,
               width: '100%', maxWidth: 540, boxShadow: '0 24px 60px -15px rgba(0,0,0,0.06)',
               overflow: 'hidden', padding: '16px 20px 24px'
             }}>
@@ -224,6 +226,7 @@ export const LandingPage: React.FC = () => {
               </div>
 
             </div>
+            </ThreeDCard>
           </div>
 
         </div>
@@ -257,7 +260,7 @@ export const LandingPage: React.FC = () => {
               </div>
               <h3 style={{ fontSize: 18, fontWeight: 700, color: '#16161a', marginBottom: 12 }}>Upload your documents</h3>
               <p style={{ fontSize: 14, lineHeight: 1.6, color: '#5e5e62' }}>
-                PDFs, Word docs, presentations — drag them in. DocMind processes, chunks, and indexes every page automatically. Watch status update in real time.
+                PDFs, Word docs, presentations — drag them in. Docly processes, chunks, and indexes every page automatically. Watch status update in real time.
               </p>
             </div>
 
@@ -394,10 +397,10 @@ export const LandingPage: React.FC = () => {
             </svg>
           </div>
           <span className="font-serif" style={{ fontWeight: 700, fontSize: 17, color: '#16161a' }}>
-            DocMind
+            Docly
           </span>
         </div>
-        <p style={{ fontSize: 13, color: '#8e8e93' }}>© 2026 DocMind Inc. Built for high-reliability enterprise document search.</p>
+        <p style={{ fontSize: 13, color: '#8e8e93' }}>© 2026 Docly Inc. Built for high-reliability enterprise document search.</p>
       </footer>
 
     </div>

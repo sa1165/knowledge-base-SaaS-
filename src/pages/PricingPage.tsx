@@ -86,7 +86,7 @@ export const PricingPage: React.FC = () => {
   const handleSelect = (planKey: string) => {
     if (planKey === 'free') navigate('/app');
     else if (planKey === 'pro') navigate('/payment');
-    else alert('Contact our sales team at sales@docmind.io for Enterprise pricing.');
+    else alert('Contact our sales team at sales@docly.io for Enterprise pricing.');
   };
 
   return (
@@ -112,8 +112,8 @@ export const PricingPage: React.FC = () => {
                 <path d="M7 7h10M7 12h10M7 17h10" />
               </svg>
             </div>
-            <span className="font-serif" style={{ fontWeight: 700, fontSize: 20, color: '#16161a', letterSpacing: '-0.01em' }}>
-              DocMind
+              <span className="font-serif" style={{ fontWeight: 700, fontSize: 20, color: '#16161a', letterSpacing: '-0.01em' }}>
+              Docly
             </span>
           </div>
 

@@ -100,7 +100,7 @@ const InnerDashboard: React.FC = () => {
                 </svg>
               </div>
               <span className="font-serif" style={{ fontSize: 18, fontWeight: 700, color: '#16161a', letterSpacing: '-0.01em' }}>
-                DocMind
+                Docly
               </span>
             </div>
           )}
