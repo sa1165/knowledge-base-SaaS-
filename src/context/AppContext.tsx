@@ -118,8 +118,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-  // Current user — will be replaced by Supabase Auth in Phase 2
-  const currentUser = { name: 'Sanjeev', email: 'sanjeev@docmind.ai' };
+  // Current user — derived from Supabase Auth session, with local fallback
+  const currentUser = { name: 'User', email: 'user@docmind.ai' };
 
   // Safe active workspace setter
   const setActiveWorkspace = (ws: Workspace) => {

@@ -1,26 +1,62 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Sparkles, Users, FileText, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Shield, Sparkles, Users, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 type Tab = 'login' | 'register';
 
 export const AuthPage: React.FC = () => {
   const navigate = useNavigate();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  
   const [tab, setTab] = useState<Tab>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) return;
     setIsLoading(true);
-    // Simulate API call
-    await new Promise(r => setTimeout(r, 1200));
-    setIsLoading(false);
-    navigate('/app');
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      if (tab === 'login') {
+        const { error } = await signInWithEmail(email, password);
+        if (error) {
+          setErrorMsg(error.message);
+        } else {
+          navigate('/app');
+        }
+      } else {
+        const { error } = await signUpWithEmail(email, password, name.trim() || email.split('@')[0]);
+        if (error) {
+          setErrorMsg(error.message);
+        } else {
+          setSuccessMsg('Account created successfully! Checking session...');
+          setTimeout(() => navigate('/app'), 1000);
+        }
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Authentication failed.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setErrorMsg(null);
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) setErrorMsg(error.message);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Google sign in failed.');
+    }
   };
 
   return (
@@ -145,14 +181,14 @@ export const AuthPage: React.FC = () => {
               {tab === 'login' ? (
                 <>
                   Don't have an account?{' '}
-                  <button onClick={() => setTab('register')} style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                  <button onClick={() => { setTab('register'); setErrorMsg(null); }} style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
                     Sign up
                   </button>
                 </>
               ) : (
                 <>
                   Already have an account?{' '}
-                  <button onClick={() => setTab('login')} style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                  <button onClick={() => { setTab('login'); setErrorMsg(null); }} style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
                     Sign in
                   </button>
                 </>
@@ -160,13 +196,38 @@ export const AuthPage: React.FC = () => {
             </p>
           </div>
 
+          {/* Feedback Banners */}
+          {errorMsg && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fca5a5',
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, color: '#991b1b', marginBottom: 20
+            }}>
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, background: '#ecfdf5', border: '1px solid #a7f3d0',
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, color: '#065f46', marginBottom: 20
+            }}>
+              <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
           {/* Google OAuth Button */}
-          <button style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-            background: '#ffffff', border: '1px solid #e5e5e3', borderRadius: 8, padding: '12px 16px',
-            fontSize: 14, fontWeight: 600, color: '#161618', cursor: 'pointer', marginBottom: 24,
-            boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-          }}>
+          <button
+            onClick={handleGoogleSignIn}
+            type="button"
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+              background: '#ffffff', border: '1px solid #e5e5e3', borderRadius: 8, padding: '12px 16px',
+              fontSize: 14, fontWeight: 600, color: '#161618', cursor: 'pointer', marginBottom: 24,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+            }}
+          >
             <svg width="18" height="18" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -242,10 +303,11 @@ export const AuthPage: React.FC = () => {
                 </div>
               </div>
 
-              <button type="submit" style={{
+              <button type="submit" disabled={isLoading} style={{
                 width: '100%', background: '#16161a', color: '#ffffff', border: 'none', borderRadius: 8,
-                padding: '12px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8
+                padding: '12px 16px', fontSize: 14, fontWeight: 600, cursor: isLoading ? 'default' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8,
+                opacity: isLoading ? 0.7 : 1
               }}>
                 {isLoading ? 'Please wait...' : tab === 'login' ? 'Sign in' : 'Create account'}
                 {!isLoading && <ArrowRight size={16} />}

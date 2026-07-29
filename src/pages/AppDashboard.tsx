@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppProvider, useApp, AppScreen } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { WorkspacesDashboard } from '../components/Workspaces/WorkspacesDashboard';
 import { HybridRagChat } from '../components/Chat/HybridRagChat';
 import { DocumentUploadStudio } from '../components/Documents/DocumentUploadStudio';
@@ -41,6 +42,13 @@ const InnerDashboard: React.FC = () => {
     currentUser, userRole,
     activeScreen, setActiveScreen,
   } = useApp();
+  const { signOut, user } = useAuth();
+  const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || currentUser.name;
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [wsDropdown, setWsDropdown] = useState(false);
@@ -252,12 +260,12 @@ const InnerDashboard: React.FC = () => {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 11, fontWeight: 700, color: '#ffffff', flexShrink: 0,
             }}>
-              {initials(currentUser.name)}
+              {initials(displayName)}
             </div>
             {sidebarOpen && (
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#16161a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentUser.name}
+                  {displayName}
                 </div>
                 <div style={{ fontSize: 11, color: '#8e8e93', textTransform: 'capitalize', fontFamily: 'monospace' }}>
                   {userRole}
@@ -267,7 +275,7 @@ const InnerDashboard: React.FC = () => {
           </div>
 
           <button
-            onClick={() => navigate('/')}
+            onClick={handleSignOut}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: sidebarOpen ? '8px 6px' : '8px',

@@ -4,9 +4,9 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- Enable uuid-ossp extension for unique identifiers
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. USERS TABLE
+-- 1. USERS TABLE (Synced with Supabase Auth & Google OAuth)
 CREATE TABLE IF NOT EXISTS public.users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   image_url TEXT,
