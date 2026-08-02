@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { processDocumentIngestion } from '../lib/ingestion/pipeline';
 import { performHybridSearch, RetrievalResult, globalVectorIndex } from '../lib/rag/hybrid-retrieval';
 import { dbApi } from '../lib/api';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 export type UserRole = 'owner' | 'editor' | 'viewer';
 export type AppScreen = 'workspaces' | 'chat' | 'documents' | 'settings' | 'billing';
@@ -140,18 +140,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [workspaces]);
 
-  // Load workspaces from Supabase on mount if configured
+  // Load workspaces from Supabase scoped to the current auth user.
+  // Re-runs whenever the authenticated user changes (login or logout).
   useEffect(() => {
-    const initData = async () => {
-      if (isSupabaseConfigured) {
-        const dbWorkspaces = await dbApi.getWorkspaces();
-        if (dbWorkspaces.length > 0) {
-          setWorkspaces(dbWorkspaces);
-          setActiveWorkspaceState(dbWorkspaces[0]);
-        }
-      }
+    if (!isSupabaseConfigured || !supabase) return;
+
+    const loadUserWorkspaces = async () => {
+      const dbWorkspaces = await dbApi.getWorkspaces();
+      setWorkspaces(dbWorkspaces);
+      setActiveWorkspaceState(dbWorkspaces.length > 0 ? dbWorkspaces[0] : null);
     };
-    initData();
+
+    // Run once immediately on mount (handles page refresh with active session)
+    loadUserWorkspaces();
+
+    // Also re-run whenever Supabase fires an auth state change (sign in / sign out)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        loadUserWorkspaces();
+      } else if (event === 'SIGNED_OUT') {
+        // Clear all local state when user signs out
+        setWorkspaces([]);
+        setActiveWorkspaceState(null);
+        setDocuments([]);
+        setMembers([]);
+        setRecentQueries([]);
+        setMessages([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Compute workspace counts dynamically based on actual arrays
@@ -173,27 +191,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Workspace CRUD ──────────────────────────────────────────────────
   const addWorkspace = async (name: string, description?: string) => {
+    // Create in Supabase with the authenticated user's ID, then update local state
     const createdWs = await dbApi.createWorkspace(name, description);
-    const newWs: Workspace = createdWs || {
-      id: `ws-${Date.now()}`,
-      name,
-      description: description || '',
-      slug: name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-      role: 'owner',
-      tier: 'free',
-      updatedAt: 'Just now',
-      color: WORKSPACE_COLORS[workspaces.length % WORKSPACE_COLORS.length],
-      docCount: 0,
-      memberCount: 0,
-      queryCount: 0,
-    };
-    setWorkspaces(prev => [newWs, ...prev]);
-    setActiveWorkspaceState(newWs);
+    if (!createdWs) {
+      console.error('Failed to create workspace in Supabase');
+      return;
+    }
+    setWorkspaces(prev => [createdWs, ...prev]);
+    setActiveWorkspaceState(createdWs);
 
-    // Auto-create owner member for the new workspace
+    // Auto-add owner member entry in local state
     const newMem: WorkspaceMember = {
       id: `u-${Date.now()}`,
-      workspaceId: newWs.id,
+      workspaceId: createdWs.id,
       name: currentUser.name,
       email: currentUser.email,
       role: 'owner',
@@ -205,6 +215,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateWorkspaceDetails = (workspaceId: string, name: string, description: string) => {
     const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    // Persist to Supabase (fire-and-forget, no await needed)
+    dbApi.updateWorkspace(workspaceId, name, description);
     setWorkspaces(prev => prev.map(w => w.id === workspaceId ? { ...w, name, description, slug, updatedAt: 'Just now' } : w));
   };
 
@@ -214,6 +226,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteWorkspace = (workspaceId: string) => {
+    // Persist delete to Supabase (fire-and-forget)
+    dbApi.deleteWorkspace(workspaceId);
     globalVectorIndex.clearWorkspace(workspaceId);
     setDocuments(prev => prev.filter(d => d.workspaceId !== workspaceId));
     setRecentQueries(prev => prev.filter(rq => rq.workspaceId !== workspaceId));
