@@ -66,16 +66,16 @@ interface AppContextType {
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
   setActiveWorkspace: (ws: Workspace) => void;
-  addWorkspace: (name: string, description?: string) => void;
-  updateWorkspaceDetails: (workspaceId: string, name: string, description: string) => void;
-  deleteAllWorkspaceDocuments: (workspaceId: string) => void;
-  deleteWorkspace: (workspaceId: string) => void;
+  addWorkspace: (name: string, description?: string) => Promise<void>;
+  updateWorkspaceDetails: (workspaceId: string, name: string, description: string) => Promise<void>;
+  deleteAllWorkspaceDocuments: (workspaceId: string) => Promise<void>;
+  deleteWorkspace: (workspaceId: string) => Promise<void>;
 
   // Members
   members: WorkspaceMember[];
-  addMember: (name: string, email: string, role: UserRole) => void;
-  updateMemberRole: (memberId: string, role: UserRole) => void;
-  removeMember: (memberId: string) => void;
+  addMember: (name: string, email: string, role: UserRole) => Promise<void>;
+  updateMemberRole: (memberId: string, role: UserRole) => Promise<void>;
+  removeMember: (memberId: string) => Promise<void>;
 
   // User / Role
   currentUser: { name: string; email: string };
@@ -85,7 +85,7 @@ interface AppContextType {
   // Documents
   documents: DocumentItem[];
   uploadDocument: (file: File) => Promise<void>;
-  deleteDocument: (docId: string) => void;
+  deleteDocument: (docId: string) => Promise<void>;
 
   // Chat & Recent Queries
   messages: ChatMessage[];
@@ -234,9 +234,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await loadWorkspaceData(createdWs.id);
   };
 
-  const updateWorkspaceDetails = (workspaceId: string, name: string, description: string) => {
+  const updateWorkspaceDetails = async (workspaceId: string, name: string, description: string): Promise<void> => {
     const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    dbApi.updateWorkspace(workspaceId, name, description); // persist to Supabase
+    await dbApi.updateWorkspace(workspaceId, name, description); // persist to Supabase
     setWorkspaces(prev => prev.map(w => w.id === workspaceId ? { ...w, name, description, slug, updatedAt: 'Just now' } : w));
   };
 
