@@ -25,29 +25,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Handle OAuth redirect flow (parse session from URL if present)
+    const client = supabase;
+
     const init = async () => {
       try {
-        if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('access_token')) {
-          // Parse session from URL and store it
-          const { data: { session: oauthSession }, error: oauthError } = await supabase.auth.getSessionFromUrl({ storeSession: true });
-          if (!oauthError && oauthSession) {
-            setSession(oauthSession);
-            setUser(oauthSession.user ?? null);
-            // Remove tokens from URL for cleanliness
-            try {
-              const cleanUrl = window.location.pathname + window.location.search;
-              history.replaceState({}, document.title, cleanUrl);
-            } catch (e) {
-              // ignore
-            }
-          }
-        }
-
-        // Get initial session (fallback/normal flow)
-        const { data: { session: initSession } } = await supabase.auth.getSession();
+        // Supabase JS SDK automatically parses OAuth tokens from the URL hash upon calling getSession()
+        const { data: { session: initSession } } = await client.auth.getSession();
         setSession(initSession);
         setUser(initSession?.user ?? null);
+
+        // Remove tokens from URL if they were successfully parsed (cleans browser address bar)
+        if (initSession && typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('access_token')) {
+          try {
+            const cleanUrl = window.location.pathname + window.location.search;
+            window.history.replaceState({}, document.title, cleanUrl);
+          } catch (e) {
+            // ignore history API errors
+          }
+        }
       } catch (e) {
         // ignore init errors, we'll fall back to empty state
       } finally {
@@ -58,7 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     init();
 
     // Listen for auth state changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, currentSession) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
       setLoading(false);
