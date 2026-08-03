@@ -138,16 +138,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Load all data for a specific workspace from Supabase ───────────────
   const loadWorkspaceData = async (workspaceId: string) => {
-    const [dbDocs, dbMembers, dbMessages, dbSession] = await Promise.all([
+    const [dbDocs, dbMembers, dbMessages, dbSession, dbChunks] = await Promise.all([
       dbApi.getDocuments(workspaceId),
       dbApi.getMembers(workspaceId),
       dbApi.getChatMessages(workspaceId),
       dbApi.getOrCreateChatSession(workspaceId),
+      dbApi.getWorkspaceChunks(workspaceId),
     ]);
     setDocuments(dbDocs);
     setMembers(dbMembers);
     setMessages(dbMessages);
     chatSessionRef.current = dbSession;
+
+    // Hydrate in-memory RAG index with chunks persisted in Supabase
+    if (dbChunks && dbChunks.length > 0) {
+      globalVectorIndex.clearWorkspace(workspaceId);
+      globalVectorIndex.addChunks(
+        dbChunks.map(c => ({
+          id: c.id,
+          documentId: c.document_id,
+          documentName: dbDocs.find(d => d.id === c.document_id)?.filename || 'Document',
+          workspaceId: c.workspace_id,
+          content: c.content,
+          embedding: Array.isArray(c.embedding) ? c.embedding : [],
+          pageNumber: c.page_number,
+        }))
+      );
+    }
   };
 
   // ── Bootstrap: auth state listener loads everything on sign-in ─────────

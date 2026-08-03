@@ -2,6 +2,7 @@ import { parseDocumentBuffer } from './parser';
 import { chunkText } from './chunker';
 import { generateEmbedding, globalVectorIndex, StoredIndexedChunk } from '../rag/hybrid-retrieval';
 import { storage } from '../storage';
+import { dbApi } from '../api';
 
 export interface IngestionResult {
   documentId: string;
@@ -19,8 +20,8 @@ export async function processDocumentIngestion(
   mimeType: string
 ): Promise<IngestionResult> {
   try {
-    // 1. Upload to storage
-    const storageKey = `workspaces/${workspaceId}/documents/${documentId}-${filename}`;
+    // 1. Upload raw binary file directly to Supabase Storage ('documents' bucket)
+    const storageKey = `workspaces/${workspaceId}/documents/${documentId}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     await storage.uploadFile(storageKey, data, mimeType);
 
     // 2. Parse text content
@@ -34,6 +35,8 @@ export async function processDocumentIngestion(
 
     // 4. Generate embeddings and index chunks
     const indexedChunks: StoredIndexedChunk[] = [];
+    const dbChunks: { chunkIndex: number; content: string; embedding?: number[]; pageNumber?: number }[] = [];
+
     for (const c of chunks) {
       const embedding = await generateEmbedding(c.content);
       indexedChunks.push({
@@ -45,9 +48,19 @@ export async function processDocumentIngestion(
         embedding,
         pageNumber: c.pageNumber
       });
+      dbChunks.push({
+        chunkIndex: c.chunkIndex,
+        content: c.content,
+        embedding,
+        pageNumber: c.pageNumber
+      });
     }
 
+    // Hydrate in-memory index for immediate local retrieval
     globalVectorIndex.addChunks(indexedChunks);
+
+    // Persist chunks permanently to Supabase 'document_chunks' table
+    await dbApi.saveDocumentChunks(workspaceId, documentId, dbChunks);
 
     return {
       documentId,

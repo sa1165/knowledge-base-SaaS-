@@ -157,6 +157,43 @@ export const dbApi = {
   },
 
   // ══════════════════════════════════════════════════════════════════
+  // DOCUMENT CHUNKS (PERSISTED TO SUPABASE)
+  // ══════════════════════════════════════════════════════════════════
+
+  async saveDocumentChunks(workspaceId: string, docId: string, chunks: { chunkIndex: number; content: string; embedding?: number[]; pageNumber?: number }[]): Promise<void> {
+    if (!isSupabaseConfigured || !supabase || chunks.length === 0) return;
+    try {
+      const rows = chunks.map(c => ({
+        workspace_id: workspaceId,
+        document_id: docId,
+        chunk_index: c.chunkIndex,
+        content: c.content,
+        embedding: c.embedding && c.embedding.length > 0 ? c.embedding : null,
+        page_number: c.pageNumber || 1,
+      }));
+      const { error } = await supabase.from('document_chunks').insert(rows);
+      if (error) console.error('[api] saveDocumentChunks:', error.message);
+    } catch (err) {
+      console.warn('[api] saveDocumentChunks failed:', err);
+    }
+  },
+
+  async getWorkspaceChunks(workspaceId: string): Promise<any[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    try {
+      const { data, error } = await supabase
+        .from('document_chunks')
+        .select('*')
+        .eq('workspace_id', workspaceId);
+      if (error) { console.warn('[api] getWorkspaceChunks:', error.message); return []; }
+      return data || [];
+    } catch (err) {
+      console.warn('[api] getWorkspaceChunks failed:', err);
+      return [];
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════
   // WORKSPACE MEMBERS
   // ══════════════════════════════════════════════════════════════════
 

@@ -1,34 +1,60 @@
 /**
  * Dual Storage Abstraction Layer
- * Supports Cloudflare R2 / S3 storage bucket or seamlessly falls back to local memory store
+ * Uploads raw files directly to Supabase Storage bucket ('documents') with fallback to local memory.
  */
+import { supabase, isSupabaseConfigured } from './supabase';
 
 export interface StorageProvider {
-  uploadFile(key: string, data: Uint8Array | ArrayBuffer | string, mimeType: string): Promise<string>;
-  getFile(key: string): Promise<Uint8Array | string>;
+  uploadFile(key: string, data: Uint8Array | ArrayBuffer | Blob | string, mimeType: string): Promise<string>;
+  getPublicUrl(key: string): string | null;
   deleteFile(key: string): Promise<void>;
 }
 
-class LocalStorageDriver implements StorageProvider {
-  private fileStore = new Map<string, Uint8Array | string>();
+class SupabaseStorageDriver implements StorageProvider {
+  private bucket = 'documents';
+  private localFallback = new Map<string, Uint8Array | ArrayBuffer | Blob | string>();
 
-  async uploadFile(key: string, data: Uint8Array | ArrayBuffer | string, _mimeType: string): Promise<string> {
-    const stored = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-    this.fileStore.set(key, stored);
+  async uploadFile(key: string, data: Uint8Array | ArrayBuffer | Blob | string, mimeType: string): Promise<string> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const fileBody = (typeof data === 'string' || data instanceof ArrayBuffer) ? new Blob([data], { type: mimeType }) : data;
+        const { data: uploadResult, error } = await supabase.storage
+          .from(this.bucket)
+          .upload(key, fileBody, {
+            contentType: mimeType,
+            upsert: true,
+          });
+
+        if (error) throw error;
+        return uploadResult.path;
+      } catch (err) {
+        console.warn(`[storage] Supabase upload failed for ${key}, falling back to local store:`, err);
+      }
+    }
+
+    // Fallback to local memory store
+    this.localFallback.set(key, data);
     return `local://${key}`;
   }
 
-  async getFile(key: string): Promise<Uint8Array | string> {
-    const file = this.fileStore.get(key);
-    if (!file) {
-      throw new Error(`File not found in local storage: ${key}`);
+  getPublicUrl(key: string): string | null {
+    if (isSupabaseConfigured && supabase) {
+      const { data } = supabase.storage.from(this.bucket).getPublicUrl(key);
+      return data?.publicUrl || null;
     }
-    return file;
+    return null;
   }
 
   async deleteFile(key: string): Promise<void> {
-    this.fileStore.delete(key);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.storage.from(this.bucket).remove([key]);
+      } catch (err) {
+        console.warn(`[storage] Supabase delete failed for ${key}:`, err);
+      }
+    }
+    this.localFallback.delete(key);
   }
 }
 
-export const storage = new LocalStorageDriver();
+export const storage = new SupabaseStorageDriver();

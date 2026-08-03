@@ -10,8 +10,10 @@ import {
   ShieldAlert, 
   Database,
   Layers,
-  FolderOpen
+  FolderOpen,
+  Download
 } from 'lucide-react';
+import { storage } from '../../lib/storage';
 
 export const DocumentUploadStudio: React.FC = () => {
   const { documents, uploadDocument, deleteDocument, userRole, activeWorkspace, workspaces, setActiveScreen } = useApp();
@@ -301,20 +303,45 @@ export const DocumentUploadStudio: React.FC = () => {
 
                       {/* Actions */}
                       <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => deleteDocument(doc.id)}
-                          disabled={isViewer}
-                          title={isViewer ? 'Restricted for Viewer' : 'Delete document'}
-                          style={{
-                            background: 'none', border: 'none', cursor: isViewer ? 'not-allowed' : 'pointer',
-                            color: isViewer ? '#e5e5e3' : '#8e8e93', transition: 'color 0.15s', padding: 6,
-                            borderRadius: 6
-                          }}
-                          onMouseEnter={(e) => { if(!isViewer) e.currentTarget.style.color = '#dc2626'; }}
-                          onMouseLeave={(e) => { if(!isViewer) e.currentTarget.style.color = '#8e8e93'; }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                          {doc.status === 'ready' && (
+                            <button
+                              onClick={() => {
+                                const storageKey = `workspaces/${doc.workspaceId}/documents/${doc.id}-${doc.filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                                const publicUrl = storage.getPublicUrl(storageKey);
+                                if (publicUrl) {
+                                  window.open(publicUrl, '_blank');
+                                } else {
+                                  alert(`Downloading ${doc.filename}...`);
+                                }
+                              }}
+                              title="Download document from Supabase Storage"
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#8e8e93', transition: 'color 0.15s', padding: 6,
+                                borderRadius: 6
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.color = '#8e8e93'; }}
+                            >
+                              <Download size={16} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteDocument(doc.id)}
+                            disabled={isViewer}
+                            title={isViewer ? 'Restricted for Viewer' : 'Delete document'}
+                            style={{
+                              background: 'none', border: 'none', cursor: isViewer ? 'not-allowed' : 'pointer',
+                              color: isViewer ? '#e5e5e3' : '#8e8e93', transition: 'color 0.15s', padding: 6,
+                              borderRadius: 6
+                            }}
+                            onMouseEnter={(e) => { if(!isViewer) e.currentTarget.style.color = '#dc2626'; }}
+                            onMouseLeave={(e) => { if(!isViewer) e.currentTarget.style.color = '#8e8e93'; }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
