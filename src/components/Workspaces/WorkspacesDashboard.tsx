@@ -472,19 +472,7 @@ export const WorkspacesDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Floating Bottom Status Pill */}
-      <div style={{
-        position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 40,
-        background: '#18181b', color: '#ffffff', border: '1px solid #27272a',
-        borderRadius: 100, padding: '7px 18px', display: 'flex', alignItems: 'center', gap: 10,
-        boxShadow: '0 10px 28px rgba(0,0,0,0.25)', fontSize: 12, fontWeight: 600
-      }}>
-        <LayoutGrid size={14} color="#a1a1aa" />
-        <span>Dashboard</span>
-        <span style={{ color: '#52525b' }}>·</span>
-        <span style={{ color: '#e4e4e7', textTransform: 'capitalize' }}>{userRole}</span>
-        <span style={{ fontSize: 10, color: '#71717a', marginLeft: 2 }}>▲</span>
-      </div>
+
 
       {showModal && (
         <NewWorkspaceModal
