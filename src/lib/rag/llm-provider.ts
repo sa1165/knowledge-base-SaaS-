@@ -30,20 +30,15 @@ const REQUEST_TIMEOUT_MS = 15000;
 
 // ── API Key Registry (Loaded statically from environment) ───────────────────
 function getGroqKeys(): string[] {
-  const meta = (import.meta as any)?.env || {};
-  const proc = typeof process !== 'undefined' ? process.env || {} : {};
-
-  const k1 = meta.VITE_GROQ_API_KEY_1 || proc.VITE_GROQ_API_KEY_1 || '';
-  const k2 = meta.VITE_GROQ_API_KEY_2 || proc.VITE_GROQ_API_KEY_2 || '';
-  const k3 = meta.VITE_GROQ_API_KEY_3 || proc.VITE_GROQ_API_KEY_3 || '';
+  const k1 = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GROQ_API_KEY_1) || (typeof process !== 'undefined' ? process.env?.VITE_GROQ_API_KEY_1 : '') || '';
+  const k2 = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GROQ_API_KEY_2) || (typeof process !== 'undefined' ? process.env?.VITE_GROQ_API_KEY_2 : '') || '';
+  const k3 = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GROQ_API_KEY_3) || (typeof process !== 'undefined' ? process.env?.VITE_GROQ_API_KEY_3 : '') || '';
 
   return [k1, k2, k3].filter(k => Boolean(k) && typeof k === 'string' && k.trim().length > 0);
 }
 
 function getGeminiKey(): string {
-  const meta = (import.meta as any)?.env || {};
-  const proc = typeof process !== 'undefined' ? process.env || {} : {};
-  return meta.VITE_GEMINI_API_KEY || proc.VITE_GEMINI_API_KEY || '';
+  return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env?.VITE_GEMINI_API_KEY : '') || '';
 }
 
 // Round-robin index (advances after each successful request)

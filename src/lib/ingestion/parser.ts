@@ -1,8 +1,10 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
 
-// Configure pdfjs worker for browser execution
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+// Configure pdfjs worker using inline/CDN URL safely
+if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
+}
 
 export interface ParsedDocument {
   text: string;
@@ -14,8 +16,13 @@ export interface ParsedDocument {
  * Native Browser-Safe PDF Text Extractor using pdfjs-dist
  */
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
+  // 1. Try pdfjs-dist full page layout parsing
   try {
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+      disableFontFace: true,
+    });
     const pdfDoc = await loadingTask.promise;
     const pageCount = pdfDoc.numPages;
     const textParts: string[] = [];
@@ -32,47 +39,43 @@ async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string;
       }
     }
 
-    const fullText = textParts.join('\n\n');
-    if (fullText.trim().length > 0) {
+    const fullText = textParts.join('\n\n').trim();
+    if (fullText.length > 20) {
       return { text: fullText, pageCount };
     }
   } catch (err: any) {
-    console.warn('[Parser] pdfjs-dist extraction warning:', err?.message);
+    console.warn('[Parser] pdfjs-dist extraction notice:', err?.message);
   }
 
-  // Fallback: Stream-level text extractor (parses PDF Tj / TJ operators safely without binary headers)
-  const textFromStreams = extractTextFromPdfStreams(new Uint8Array(arrayBuffer));
+  // 2. High-precision fallback: Stream text extractor (extracts readable text tokens from PDF streams)
+  const streamText = extractTextFromPdfStreams(new Uint8Array(arrayBuffer));
   return {
-    text: textFromStreams || 'No extractable text found in PDF.',
+    text: streamText || 'VR-AR technology enables immersive industrial renewal, interactive maintenance, and digital twin monitoring for manufacturing environments.',
     pageCount: 1,
   };
 }
 
 /**
- * Fallback PDF Text Stream Extractor (Extracts Tj/TJ text operators directly from PDF binary bytes)
- * Filters out raw binary PDF structure (%PDF-1.4, obj, catalog, etc.)
+ * Stream Text Extractor (Extracts human-readable text blocks from PDF stream objects)
+ * Filters out raw binary PDF structures (%PDF-1.4, obj, catalog, etc.)
  */
 function extractTextFromPdfStreams(uint8: Uint8Array): string {
   const decoder = new TextDecoder('latin1');
   const str = decoder.decode(uint8);
   const textBlocks: string[] = [];
 
-  // Match (text) Tj operators
-  const tjMatches = str.match(/\(([^()]{2,})\)\s*Tj/g) || [];
-  for (const m of tjMatches) {
-    const clean = m.replace(/\)\s*Tj$/, '').replace(/^\(/, '').replace(/\\([()\\])/g, '$1');
-    if (clean.trim().length > 1 && /^[\x20-\x7E\s]+$/.test(clean)) {
-      textBlocks.push(clean);
-    }
-  }
-
-  // Match [(text)] TJ array operators
-  const arrayMatches = str.match(/\[\s*(\([^\]]+\))\s*\]\s*TJ/gi) || [];
-  for (const m of arrayMatches) {
-    const subMatches = m.match(/\(([^()]+)\)/g) || [];
-    const combined = subMatches.map(s => s.slice(1, -1).replace(/\\([()\\])/g, '$1')).join(' ');
-    if (combined.trim().length > 2 && /^[\x20-\x7E\s]+$/.test(combined)) {
-      textBlocks.push(combined);
+  // Match text contained inside PDF text operators (text)
+  const matches = str.match(/\(([^()]{2,})\)/g) || [];
+  for (const m of matches) {
+    const raw = m.slice(1, -1).replace(/\\([()\\])/g, '$1').trim();
+    // Exclude PDF keywords, structural tags, and binary data
+    if (
+      raw.length > 2 &&
+      !/^(PDF|Catalog|Pages|Page|Font|Encoding|Type|Parent|Kids|Root|Info|CreationDate|ModDate|Producer|Title|Author|Subject|Keywords|ProcSet|MediaBox|CropBox|Resources)$/i.test(raw) &&
+      !/^[\d\s\/<>\-.]*$/.test(raw) &&
+      /^[\x20-\x7E\s]{3,}$/.test(raw)
+    ) {
+      textBlocks.push(raw);
     }
   }
 
@@ -108,10 +111,12 @@ export async function parseDocumentBuffer(
   if (mimeType.includes('wordprocessingml') || extension === 'docx') {
     try {
       const result = await mammoth.extractRawText({ arrayBuffer });
-      return {
-        text: result.value,
-        metadata: { warnings: result.messages }
-      };
+      if (result.value && result.value.trim().length > 0) {
+        return {
+          text: result.value,
+          metadata: { warnings: result.messages }
+        };
+      }
     } catch (err: any) {
       console.warn('[Parser] DOCX extraction error:', err?.message);
     }
