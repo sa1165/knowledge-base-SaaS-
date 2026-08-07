@@ -152,6 +152,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Load all data for a specific workspace from Supabase ───────────────
   const loadWorkspaceData = async (workspaceId: string) => {
+    // Clear chat state immediately to prevent stale workspace leak
+    setMessages([]);
+    setChatSessions([]);
+    setActiveSessionId(null);
+    chatSessionRef.current = null;
+
     const [dbDocs, dbMembers, dbSessions, dbChunks] = await Promise.all([
       dbApi.getDocuments(workspaceId),
       dbApi.getMembers(workspaceId),

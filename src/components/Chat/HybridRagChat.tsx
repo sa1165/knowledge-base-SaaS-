@@ -153,7 +153,7 @@ export const HybridRagChat: React.FC = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isSending, streamingText]);
+  }, [messages.length, activeSessionId]);
 
   // Handle Typewriter Animation for the latest Assistant message
   const lastMsg = messages[messages.length - 1];
