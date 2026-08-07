@@ -6,29 +6,46 @@ export interface Chunk {
   sectionHeading?: string;
 }
 
+/**
+ * Page-Aware Document Chunker
+ * Detects `--- Page X ---` boundaries, maintains accurate page tracking per chunk,
+ * and strips page markers out of text content.
+ */
 export function chunkText(
   text: string,
-  targetChunkSize = 400,
-  overlapSize = 50
+  targetChunkSize = 350,
+  overlapSize = 40
 ): Chunk[] {
   if (!text || text.trim().length === 0) return [];
 
   // Normalize line breaks
   const normalizedText = text.replace(/\r\n/g, '\n');
-  const paragraphs = normalizedText.split(/\n\s*\n/);
+  const lines = normalizedText.split('\n');
 
   const chunks: Chunk[] = [];
   let currentChunkWords: string[] = [];
   let chunkIndex = 0;
   let currentPage = 1;
+  let currentHeading: string | undefined = undefined;
 
-  for (const paragraph of paragraphs) {
-    const words = paragraph.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) continue;
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
 
-    // Check for page marker comments or headers
-    const headingMatch = paragraph.match(/^#+\s+(.+)$/m);
-    const sectionHeading = headingMatch ? headingMatch[1] : undefined;
+    // Detect Page Marker: `--- Page X ---`
+    const pageMatch = trimmedLine.match(/^---\s*Page\s+(\d+)\s*---$/i);
+    if (pageMatch) {
+      currentPage = parseInt(pageMatch[1], 10);
+      continue; // Don't add page marker line itself into chunk text
+    }
+
+    // Detect Section Heading
+    const headingMatch = trimmedLine.match(/^#+\s+(.+)$/) || trimmedLine.match(/^([A-Z0-9\s.:-]{4,50})$/);
+    if (headingMatch && !trimmedLine.includes('---')) {
+      currentHeading = headingMatch[1].trim();
+    }
+
+    const words = trimmedLine.split(/\s+/).filter(Boolean);
 
     if (currentChunkWords.length + words.length <= targetChunkSize) {
       currentChunkWords.push(...words);
@@ -41,7 +58,7 @@ export function chunkText(
           content,
           tokenCount: Math.ceil(currentChunkWords.length * 1.3),
           pageNumber: currentPage,
-          sectionHeading
+          sectionHeading: currentHeading
         });
       }
 
@@ -58,7 +75,8 @@ export function chunkText(
       chunkIndex: chunkIndex++,
       content,
       tokenCount: Math.ceil(currentChunkWords.length * 1.3),
-      pageNumber: currentPage
+      pageNumber: currentPage,
+      sectionHeading: currentHeading
     });
   }
 

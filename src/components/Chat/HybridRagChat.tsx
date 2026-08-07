@@ -332,14 +332,14 @@ export const HybridRagChat: React.FC = () => {
                   key={src.chunkId || idx}
                   onClick={() => setSelectedSource(src)}
                   style={{
-                    padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    padding: '6px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 600,
                     border: selectedSource.chunkId === src.chunkId ? '1px solid #2563eb' : '1px solid #eaeaea',
                     background: selectedSource.chunkId === src.chunkId ? '#eff6ff' : '#f9f9f8',
                     color: selectedSource.chunkId === src.chunkId ? '#2563eb' : '#5e5e62',
                     cursor: 'pointer', flexShrink: 0
                   }}
                 >
-                  Source #{idx + 1}
+                  Source #{idx + 1} {src.pageNumber ? `(p. ${src.pageNumber})` : ''}
                 </button>
               ))}
             </div>
@@ -350,31 +350,36 @@ export const HybridRagChat: React.FC = () => {
                 <div style={{ width: 36, height: 36, background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <FileText size={16} color="#2563eb" />
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a' }}>{selectedSource.documentName}</div>
-                  <div style={{ fontSize: 11, color: '#8e8e93', marginTop: 2 }}>
-                    {selectedSource.pageNumber ? `Page ${selectedSource.pageNumber}` : 'Full section'}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selectedSource.documentName}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#2563eb', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <BookOpen size={12} /> {selectedSource.pageNumber ? `Exact Page ${selectedSource.pageNumber}` : 'Full section'}
                   </div>
                 </div>
               </div>
 
               {/* Relevance Score Badge */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 10px', borderRadius: 100 }}>
                   {Math.round((selectedSource.rerankScore || selectedSource.score) * 100)}% Relevance Match
+                </span>
+                <span style={{ fontSize: 11, color: '#8e8e93', fontFamily: 'monospace' }}>
+                  Chunk #{selectedSource.chunkId.split('-').pop() || '1'}
                 </span>
               </div>
 
               {/* Text Excerpt */}
               <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#8e8e93', marginBottom: 8 }}>
-                Retrieved Context Snippet
+                Retrieved Document Passage
               </div>
               <blockquote style={{
                 background: '#ffffff', border: '1px solid #eaeaea', borderRadius: 8,
                 padding: '12px', fontSize: 12.5, color: '#374151', lineHeight: 1.6,
-                margin: 0, maxHeight: 240, overflowY: 'auto'
+                margin: 0, maxHeight: 280, overflowY: 'auto', whiteSpace: 'pre-wrap'
               }}>
-                "{selectedSource.content}"
+                "{selectedSource.content.replace(/---\s*Page\s+\d+\s*---/gi, '').trim()}"
               </blockquote>
             </div>
 
