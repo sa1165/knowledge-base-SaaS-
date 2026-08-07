@@ -158,6 +158,13 @@ export const dbApi = {
     if (error) console.error('[api] deleteDocument:', error.message);
   },
 
+  async deleteAllWorkspaceDocuments(workspaceId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    await supabase.from('document_chunks').delete().eq('workspace_id', workspaceId);
+    const { error } = await supabase.from('documents').delete().eq('workspace_id', workspaceId);
+    if (error) console.error('[api] deleteAllWorkspaceDocuments:', error.message);
+  },
+
   // ══════════════════════════════════════════════════════════════════
   // DOCUMENT CHUNKS (PERSISTED TO SUPABASE)
   // ══════════════════════════════════════════════════════════════════
@@ -254,13 +261,71 @@ export const dbApi = {
   // CHAT SESSIONS + MESSAGES
   // ══════════════════════════════════════════════════════════════════
 
+  async getChatSessions(workspaceId: string): Promise<{ id: string; workspaceId: string; title: string; updatedAt: string }[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const userId = await getAuthUserId();
+    if (!userId) return [];
+
+    const { data, error } = await supabase
+      .from('chat_sessions')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (error) { console.warn('[api] getChatSessions:', error.message); return []; }
+
+    return (data || []).map(row => ({
+      id: row.id,
+      workspaceId: row.workspace_id,
+      title: row.title || 'New Chat',
+      updatedAt: new Date(row.updated_at || row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }));
+  },
+
+  async createChatSession(workspaceId: string, title = 'New Chat'): Promise<{ id: string; workspaceId: string; title: string; updatedAt: string } | null> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id: `cs-${Date.now()}`, workspaceId, title, updatedAt: 'Just now' };
+    }
+    const userId = await getAuthUserId();
+    if (!userId) return null;
+
+    const { data, error } = await supabase
+      .from('chat_sessions')
+      .insert({ workspace_id: workspaceId, user_id: userId, title })
+      .select()
+      .single();
+
+    if (error) { console.error('[api] createChatSession:', error.message); return null; }
+
+    return {
+      id: data.id,
+      workspaceId: data.workspace_id,
+      title: data.title || title,
+      updatedAt: 'Just now',
+    };
+  },
+
+  async renameChatSession(sessionId: string, title: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    const { error } = await supabase.from('chat_sessions').update({ title, updated_at: new Date().toISOString() }).eq('id', sessionId);
+    if (error) console.error('[api] renameChatSession:', error.message);
+  },
+
+  async deleteChatSession(sessionId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    // Delete associated chat messages first
+    await supabase.from('chat_messages').delete().eq('session_id', sessionId);
+    const { error } = await supabase.from('chat_sessions').delete().eq('id', sessionId);
+    if (error) console.error('[api] deleteChatSession:', error.message);
+  },
+
   /** Get or create a chat session for the current user in the given workspace. */
   async getOrCreateChatSession(workspaceId: string): Promise<string | null> {
     if (!isSupabaseConfigured || !supabase) return null;
     const userId = await getAuthUserId();
     if (!userId) return null;
 
-    // Try to find an existing session for this user in this workspace
     const { data: existing } = await supabase
       .from('chat_sessions')
       .select('id')
@@ -272,41 +337,20 @@ export const dbApi = {
 
     if (existing?.id) return existing.id;
 
-    // No session yet — create one
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .insert({ workspace_id: workspaceId, user_id: userId, title: 'Chat' })
-      .select('id')
-      .single();
-
-    if (error) { console.error('[api] getOrCreateChatSession:', error.message); return null; }
-    return data.id;
+    const session = await this.createChatSession(workspaceId, 'New Chat');
+    return session?.id || null;
   },
 
-  async getChatMessages(workspaceId: string): Promise<ChatMessage[]> {
+  async getChatMessagesForSession(sessionId: string): Promise<ChatMessage[]> {
     if (!isSupabaseConfigured || !supabase) return [];
-    const userId = await getAuthUserId();
-    if (!userId) return [];
-
-    // Get the most recent session for this user + workspace
-    const { data: session } = await supabase
-      .from('chat_sessions')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!session?.id) return [];
 
     const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
-      .eq('session_id', session.id)
+      .eq('session_id', sessionId)
       .order('created_at', { ascending: true });
 
-    if (error) { console.warn('[api] getChatMessages:', error.message); return []; }
+    if (error) { console.warn('[api] getChatMessagesForSession:', error.message); return []; }
 
     return (data || []).map(row => ({
       id: row.id,
@@ -315,6 +359,37 @@ export const dbApi = {
       sources: row.sources || [],
       timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }));
+  },
+
+  async getChatMessages(workspaceId: string): Promise<ChatMessage[]> {
+    const sessionId = await this.getOrCreateChatSession(workspaceId);
+    if (!sessionId) return [];
+    return this.getChatMessagesForSession(sessionId);
+  },
+
+  async deleteMessagesForDocument(workspaceId: string, docId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      // Find chat sessions for this workspace
+      const { data: sessions } = await supabase.from('chat_sessions').select('id').eq('workspace_id', workspaceId);
+      if (!sessions || sessions.length === 0) return;
+      const sessionIds = sessions.map(s => s.id);
+
+      // Fetch messages for these sessions
+      const { data: msgs } = await supabase.from('chat_messages').select('id, sources').in('session_id', sessionIds);
+      if (!msgs) return;
+
+      // Identify messages whose sources match docId
+      const toDeleteIds = msgs
+        .filter(m => Array.isArray(m.sources) && m.sources.some((s: any) => s.documentId === docId))
+        .map(m => m.id);
+
+      if (toDeleteIds.length > 0) {
+        await supabase.from('chat_messages').delete().in('id', toDeleteIds);
+      }
+    } catch (err) {
+      console.warn('[api] deleteMessagesForDocument failed:', err);
+    }
   },
 
   async saveMessage(sessionId: string, role: 'user' | 'assistant', content: string, sources: any[] = []): Promise<string | null> {

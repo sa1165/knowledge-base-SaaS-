@@ -53,6 +53,13 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface ChatSessionItem {
+  id: string;
+  workspaceId: string;
+  title: string;
+  updatedAt: string;
+}
+
 export interface RecentQuery {
   id: string;
   query: string;
@@ -88,11 +95,17 @@ interface AppContextType {
   uploadDocument: (file: File) => Promise<void>;
   deleteDocument: (docId: string) => Promise<void>;
 
-  // Chat & Recent Queries
+  // Chat Sessions & Messages
+  chatSessions: ChatSessionItem[];
+  activeSessionId: string | null;
   messages: ChatMessage[];
   recentQueries: RecentQuery[];
   sendMessage: (text: string) => Promise<void>;
   isSending: boolean;
+  createNewChatSession: () => Promise<void>;
+  renameChatSession: (sessionId: string, newTitle: string) => Promise<void>;
+  deleteChatSession: (sessionId: string) => Promise<void>;
+  switchChatSession: (sessionId: string) => Promise<void>;
 
   // Navigation
   activeScreen: AppScreen;
@@ -115,15 +128,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<AppTab>('chat');
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSessionItem[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string }>({ name: 'User', email: '' });
 
-  // Track the current chat session ID so messages append to the same session
   const chatSessionRef = useRef<string | null>(null);
 
   // ── Safe active workspace setter ───────────────────────────────────────
   const setActiveWorkspace = async (ws: Workspace) => {
     setActiveWorkspaceState(ws);
-    // Load documents, members, and chat messages for the newly selected workspace
     await loadWorkspaceData(ws.id);
   };
 
@@ -139,17 +152,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Load all data for a specific workspace from Supabase ───────────────
   const loadWorkspaceData = async (workspaceId: string) => {
-    const [dbDocs, dbMembers, dbMessages, dbSession, dbChunks] = await Promise.all([
+    const [dbDocs, dbMembers, dbSessions, dbChunks] = await Promise.all([
       dbApi.getDocuments(workspaceId),
       dbApi.getMembers(workspaceId),
-      dbApi.getChatMessages(workspaceId),
-      dbApi.getOrCreateChatSession(workspaceId),
+      dbApi.getChatSessions(workspaceId),
       dbApi.getWorkspaceChunks(workspaceId),
     ]);
     setDocuments(dbDocs);
     setMembers(dbMembers);
-    setMessages(dbMessages);
-    chatSessionRef.current = dbSession;
+    setChatSessions(dbSessions);
+
+    if (dbSessions.length > 0) {
+      const currentId = dbSessions[0].id;
+      setActiveSessionId(currentId);
+      chatSessionRef.current = currentId;
+      const dbMsgs = await dbApi.getChatMessagesForSession(currentId);
+      setMessages(dbMsgs);
+    } else {
+      const newSession = await dbApi.createChatSession(workspaceId, 'New Chat');
+      if (newSession) {
+        setChatSessions([newSession]);
+        setActiveSessionId(newSession.id);
+        chatSessionRef.current = newSession.id;
+        setMessages([]);
+      }
+    }
 
     // Hydrate in-memory RAG index with chunks persisted in Supabase
     if (dbChunks && dbChunks.length > 0) {
@@ -173,7 +200,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!isSupabaseConfigured || !supabase) return;
 
     const bootstrap = async () => {
-      // Resolve current user info
       const { data: { session } } = await supabase!.auth.getSession();
       if (session?.user) {
         const meta = session.user.user_metadata;
@@ -183,26 +209,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
 
-      // Load workspaces (scoped to the logged-in user)
       const dbWorkspaces = await dbApi.getWorkspaces();
       setWorkspaces(dbWorkspaces);
 
-      // Load data for the first workspace if any
       if (dbWorkspaces.length > 0) {
-        const first = dbWorkspaces[0];
-        setActiveWorkspaceState(first);
-        await loadWorkspaceData(first.id);
-
-        // Also load recent queries from all workspaces
-        const dbQueries = await dbApi.getRecentQueries(20);
-        setRecentQueries(dbQueries);
+        setActiveWorkspaceState(dbWorkspaces[0]);
+        await loadWorkspaceData(dbWorkspaces[0].id);
       }
     };
 
-    // Run immediately to handle page refresh with active session
     bootstrap();
 
-    // Re-run whenever auth state changes
     const { data: { subscription } } = supabase!.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         const meta = session.user.user_metadata;
@@ -210,89 +227,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: meta?.full_name || meta?.name || session.user.email?.split('@')[0] || 'User',
           email: session.user.email || '',
         });
-        await bootstrap();
+        const dbWorkspaces = await dbApi.getWorkspaces();
+        setWorkspaces(dbWorkspaces);
+        if (dbWorkspaces.length > 0) {
+          setActiveWorkspaceState(dbWorkspaces[0]);
+          await loadWorkspaceData(dbWorkspaces[0].id);
+        }
       } else if (event === 'SIGNED_OUT') {
-        // Clear ALL local state on sign out
         setWorkspaces([]);
         setActiveWorkspaceState(null);
-        setDocuments([]);
         setMembers([]);
-        setRecentQueries([]);
+        setDocuments([]);
         setMessages([]);
-        chatSessionRef.current = null;
-        setCurrentUser({ name: 'User', email: '' });
+        setChatSessions([]);
+        setActiveSessionId(null);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // ── Compute enriched counts dynamically ───────────────────────────────
-  const enrichedWorkspaces = workspaces.map(ws => {
-    const wsDocs = documents.filter(d => d.workspaceId === ws.id);
-    const wsMembers = members.filter(m => m.workspaceId === ws.id);
-    const wsQueries = recentQueries.filter(q => q.workspaceId === ws.id);
-    return { ...ws, docCount: wsDocs.length, memberCount: wsMembers.length, queryCount: wsQueries.length };
-  });
-
-  const enrichedActiveWorkspace = activeWorkspace
-    ? enrichedWorkspaces.find(w => w.id === activeWorkspace.id) || null
-    : null;
-
   // ══════════════════════════════════════════════════════════════════
-  // WORKSPACE CRUD
+  // WORKSPACE ACTIONS
   // ══════════════════════════════════════════════════════════════════
 
   const addWorkspace = async (name: string, description?: string) => {
-    const createdWs = await dbApi.createWorkspace(name, description);
-    if (!createdWs) { console.error('Failed to create workspace in Supabase'); return; }
-    setWorkspaces(prev => [createdWs, ...prev]);
-    setActiveWorkspaceState(createdWs);
-    // Immediately load (empty) data for the new workspace and create chat session
-    await loadWorkspaceData(createdWs.id);
+    const newWs = await dbApi.createWorkspace(name, description);
+    if (!newWs) return;
+    setWorkspaces(prev => [newWs, ...prev]);
+    setActiveWorkspaceState(newWs);
+    await loadWorkspaceData(newWs.id);
   };
 
-  const updateWorkspaceDetails = async (workspaceId: string, name: string, description: string): Promise<void> => {
-    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    await dbApi.updateWorkspace(workspaceId, name, description); // persist to Supabase
-    setWorkspaces(prev => prev.map(w => w.id === workspaceId ? { ...w, name, description, slug, updatedAt: 'Just now' } : w));
+  const updateWorkspaceDetails = async (workspaceId: string, name: string, description: string) => {
+    if (userRole === 'viewer') { alert('Permission Denied: Viewer role cannot edit workspace settings.'); return; }
+    await dbApi.updateWorkspace(workspaceId, name, description);
+    setWorkspaces(prev => prev.map(w => w.id === workspaceId ? { ...w, name, description } : w));
   };
 
   const deleteAllWorkspaceDocuments = async (workspaceId: string) => {
+    if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can perform batch document deletion.'); return; }
+    await dbApi.deleteAllWorkspaceDocuments(workspaceId);
+    setDocuments([]);
     globalVectorIndex.clearWorkspace(workspaceId);
-    // Delete each document from Supabase
-    const wsDocs = documents.filter(d => d.workspaceId === workspaceId);
-    await Promise.all(wsDocs.map(d => dbApi.deleteDocument(d.id)));
-    setDocuments(prev => prev.filter(d => d.workspaceId !== workspaceId));
   };
 
   const deleteWorkspace = async (workspaceId: string) => {
-    await dbApi.deleteWorkspace(workspaceId); // Supabase CASCADE will delete docs, members, sessions, messages
+    if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can delete a workspace.'); return; }
+    await dbApi.deleteWorkspace(workspaceId);
+    setWorkspaces(prev => prev.filter(w => w.id !== workspaceId));
     globalVectorIndex.clearWorkspace(workspaceId);
-    setDocuments(prev => prev.filter(d => d.workspaceId !== workspaceId));
-    setRecentQueries(prev => prev.filter(rq => rq.workspaceId !== workspaceId));
-    setMembers(prev => prev.filter(m => m.workspaceId !== workspaceId));
-    setWorkspaces(prev => {
-      const next = prev.filter(w => w.id !== workspaceId);
-      if (activeWorkspace?.id === workspaceId) {
-        const nextActive = next.length > 0 ? next[0] : null;
-        setActiveWorkspaceState(nextActive);
-        if (nextActive) loadWorkspaceData(nextActive.id);
-        else { setDocuments([]); setMembers([]); setMessages([]); }
-      }
-      return next;
-    });
   };
 
   // ══════════════════════════════════════════════════════════════════
-  // MEMBERS CRUD
+  // WORKSPACE MEMBERS
   // ══════════════════════════════════════════════════════════════════
 
   const addMember = async (name: string, email: string, role: UserRole) => {
     if (!activeWorkspace) return;
-    // In a full app you'd look up userId by email. For now add locally.
+    if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can invite team members.'); return; }
+    const dbMemberId = await dbApi.addMember(activeWorkspace.id, email, role);
     const newMem: WorkspaceMember = {
-      id: `m-${Date.now()}`,
+      id: typeof dbMemberId === 'string' ? dbMemberId : `mem-${Date.now()}`,
       workspaceId: activeWorkspace.id,
       name,
       email,
@@ -321,8 +317,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (userRole === 'viewer') { alert('Permission Denied: Viewer role cannot upload documents.'); return; }
 
     const estPages = Math.max(1, Math.ceil(file.size / 30000));
-
-    // 1. Create DB record immediately (status = uploading)
     const dbDocId = await dbApi.createDocument(activeWorkspace.id, file);
     const docId = dbDocId || `doc-${Date.now()}`;
 
@@ -340,15 +334,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDocuments(prev => [newDoc, ...prev]);
 
     try {
-      // 2. Switch to processing
       setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: 'processing' } : d));
       await dbApi.updateDocumentStatus(docId, 'processing', 0);
 
-      // 3. Run ingestion pipeline
       const arrayBuffer = await file.arrayBuffer();
       const result = await processDocumentIngestion(activeWorkspace.id, docId, file.name, arrayBuffer, file.type);
 
-      // 4. Update status to ready + chunk count
       setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: result.status, chunkCount: result.chunkCount } : d));
       await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount);
     } catch {
@@ -360,24 +351,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteDocument = async (docId: string) => {
     if (userRole === 'viewer') { alert('Permission Denied: Viewer role cannot delete documents.'); return; }
     await dbApi.deleteDocument(docId);
-    // Evict from in-memory RAG index immediately
+    // Evict from in-memory RAG index
     globalVectorIndex.removeDocumentChunks(docId);
     setDocuments(prev => prev.filter(d => d.id !== docId));
+
+    // Delete chat messages referencing this document
+    if (activeWorkspace) {
+      await dbApi.deleteMessagesForDocument(activeWorkspace.id, docId);
+      if (activeSessionId) {
+        const updatedMsgs = await dbApi.getChatMessagesForSession(activeSessionId);
+        setMessages(updatedMsgs);
+      }
+    }
   };
 
   // ══════════════════════════════════════════════════════════════════
-  // CHAT MESSAGES
+  // CHAT SESSIONS & MESSAGES
   // ══════════════════════════════════════════════════════════════════
+
+  const createNewChatSession = async () => {
+    if (!activeWorkspace) return;
+    const newSession = await dbApi.createChatSession(activeWorkspace.id, 'New Chat');
+    if (newSession) {
+      setChatSessions(prev => [newSession, ...prev]);
+      setActiveSessionId(newSession.id);
+      chatSessionRef.current = newSession.id;
+      setMessages([]);
+    }
+  };
+
+  const renameChatSession = async (sessionId: string, newTitle: string) => {
+    await dbApi.renameChatSession(sessionId, newTitle);
+    setChatSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: newTitle } : s));
+  };
+
+  const deleteChatSession = async (sessionId: string) => {
+    await dbApi.deleteChatSession(sessionId);
+    const nextSessions = chatSessions.filter(s => s.id !== sessionId);
+    setChatSessions(nextSessions);
+
+    if (activeSessionId === sessionId) {
+      if (nextSessions.length > 0) {
+        await switchChatSession(nextSessions[0].id);
+      } else {
+        await createNewChatSession();
+      }
+    }
+  };
+
+  const switchChatSession = async (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    chatSessionRef.current = sessionId;
+    const msgs = await dbApi.getChatMessagesForSession(sessionId);
+    setMessages(msgs);
+  };
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || !activeWorkspace) return;
 
-    // Ensure we have a chat session
     if (!chatSessionRef.current) {
-      chatSessionRef.current = await dbApi.getOrCreateChatSession(activeWorkspace.id);
+      const session = await dbApi.createChatSession(activeWorkspace.id, 'New Chat');
+      if (session) {
+        chatSessionRef.current = session.id;
+        setActiveSessionId(session.id);
+        setChatSessions(prev => [session, ...prev]);
+      }
     }
 
-    // Save and display the user message
+    // Auto-rename session if it's currently titled 'New Chat' or 'Chat'
+    const currentSession = chatSessions.find(s => s.id === chatSessionRef.current);
+    if (currentSession && (currentSession.title === 'New Chat' || currentSession.title === 'Chat')) {
+      const autoTitle = text.length > 32 ? text.slice(0, 32) + '...' : text;
+      renameChatSession(chatSessionRef.current!, autoTitle);
+    }
+
     const userMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'user', text);
     const userMsg: ChatMessage = {
       id: userMsgId || `msg-${Date.now()}`,
@@ -387,7 +434,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Add to recent queries
     const newRq: RecentQuery = {
       id: userMsgId || `rq-${Date.now()}`,
       query: text,
@@ -402,7 +448,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const sources = await performHybridSearch(activeWorkspace.id, text, 4, 60);
 
-      // Guard: if no indexed chunks exist, skip LLM call entirely
       if (sources.length === 0) {
         const noContextMsg = "Based on your uploaded documents, I could not find relevant information to answer this query. Please ensure your documents are fully indexed (status: Ready) before asking questions.";
         const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', noContextMsg, []);
@@ -428,8 +473,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const llmResult = await generateGroundedResponse(text, contextItems);
       const answerText = llmResult.answer;
 
-      console.log(`[RAG] Provider: ${llmResult.providerUsed}, Model: ${llmResult.modelUsed}, Latency: ${llmResult.latencyMs}ms, Sources: ${sources.length}`);
-
       const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', answerText, sources);
       const assistantMsg: ChatMessage = {
         id: assistantMsgId || `msg-${Date.now() + 1}`,
@@ -452,38 +495,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // ── Filter members list to active workspace ────────────────────────────
   const activeWorkspaceMembers = activeWorkspace
     ? members.filter(m => m.workspaceId === activeWorkspace.id)
     : [];
 
   return (
     <AppContext.Provider value={{
-      workspaces: enrichedWorkspaces,
-      activeWorkspace: enrichedActiveWorkspace,
-      setActiveWorkspace,
-      addWorkspace,
-      updateWorkspaceDetails,
-      deleteAllWorkspaceDocuments,
-      deleteWorkspace,
-      members: activeWorkspaceMembers,
-      addMember,
-      updateMemberRole,
-      removeMember,
-      currentUser,
-      userRole,
-      setUserRole,
-      documents,
-      uploadDocument,
-      deleteDocument,
-      messages,
-      recentQueries,
-      sendMessage,
-      isSending,
-      activeScreen,
-      setActiveScreen,
-      activeTab,
-      setActiveTab,
+      workspaces, activeWorkspace, setActiveWorkspace, addWorkspace, updateWorkspaceDetails, deleteAllWorkspaceDocuments, deleteWorkspace,
+      members: activeWorkspaceMembers, addMember, updateMemberRole, removeMember,
+      currentUser, userRole, setUserRole,
+      documents, uploadDocument, deleteDocument,
+      chatSessions: activeWorkspace ? chatSessions.filter(s => s.workspaceId === activeWorkspace.id) : [],
+      activeSessionId, messages, recentQueries, sendMessage, isSending,
+      createNewChatSession, renameChatSession, deleteChatSession, switchChatSession,
+      activeScreen, setActiveScreen, activeTab, setActiveTab
     }}>
       {children}
     </AppContext.Provider>
@@ -491,7 +516,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 };
 
 export const useApp = () => {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be used within AppProvider');
-  return ctx;
+  const context = useContext(AppContext);
+  if (!context) throw new Error('useApp must be used within an AppProvider');
+  return context;
 };
