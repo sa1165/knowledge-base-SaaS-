@@ -152,6 +152,8 @@ export const dbApi = {
 
   async deleteDocument(docId: string): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
+    // Delete associated chunks first (foreign key cascade may not be enabled)
+    await supabase.from('document_chunks').delete().eq('document_id', docId);
     const { error } = await supabase.from('documents').delete().eq('id', docId);
     if (error) console.error('[api] deleteDocument:', error.message);
   },
@@ -163,6 +165,9 @@ export const dbApi = {
   async saveDocumentChunks(workspaceId: string, docId: string, chunks: { chunkIndex: number; content: string; embedding?: number[]; pageNumber?: number }[]): Promise<void> {
     if (!isSupabaseConfigured || !supabase || chunks.length === 0) return;
     try {
+      // Deduplicate: delete any existing chunks for this document before inserting
+      await supabase.from('document_chunks').delete().eq('document_id', docId);
+
       const rows = chunks.map(c => ({
         workspace_id: workspaceId,
         document_id: docId,

@@ -360,6 +360,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteDocument = async (docId: string) => {
     if (userRole === 'viewer') { alert('Permission Denied: Viewer role cannot delete documents.'); return; }
     await dbApi.deleteDocument(docId);
+    // Evict from in-memory RAG index immediately
+    globalVectorIndex.removeDocumentChunks(docId);
     setDocuments(prev => prev.filter(d => d.id !== docId));
   };
 
@@ -399,6 +401,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSending(true);
     try {
       const sources = await performHybridSearch(activeWorkspace.id, text, 4, 60);
+
+      // Guard: if no indexed chunks exist, skip LLM call entirely
+      if (sources.length === 0) {
+        const noContextMsg = "Based on your uploaded documents, I could not find relevant information to answer this query. Please ensure your documents are fully indexed (status: Ready) before asking questions.";
+        const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', noContextMsg, []);
+        setMessages(prev => [...prev, {
+          id: assistantMsgId || `msg-${Date.now() + 1}`,
+          role: 'assistant',
+          content: noContextMsg,
+          sources: [],
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+        setIsSending(false);
+        return;
+      }
+
       const contextItems = sources.map(s => ({
         id: s.chunkId,
         documentName: s.documentName,
@@ -409,6 +427,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const llmResult = await generateGroundedResponse(text, contextItems);
       const answerText = llmResult.answer;
+
+      console.log(`[RAG] Provider: ${llmResult.providerUsed}, Model: ${llmResult.modelUsed}, Latency: ${llmResult.latencyMs}ms, Sources: ${sources.length}`);
 
       const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', answerText, sources);
       const assistantMsg: ChatMessage = {
