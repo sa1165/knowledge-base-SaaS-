@@ -183,10 +183,26 @@ export const dbApi = {
         embedding: c.embedding && c.embedding.length > 0 ? c.embedding : null,
         page_number: c.pageNumber || 1,
       }));
-      const { error } = await supabase.from('document_chunks').insert(rows);
-      if (error) console.error('[api] saveDocumentChunks:', error.message);
+
+      // Batch insert in chunks of 100 rows to prevent HTTP payload size limits on 500+ page PDFs
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase.from('document_chunks').insert(batch);
+        if (error) console.error(`[api] saveDocumentChunks batch ${i / BATCH_SIZE + 1}:`, error.message);
+      }
     } catch (err) {
       console.warn('[api] saveDocumentChunks failed:', err);
+    }
+  },
+
+  async deleteDocumentChunks(docId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      const { error } = await supabase.from('document_chunks').delete().eq('document_id', docId);
+      if (error) console.error('[api] deleteDocumentChunks:', error.message);
+    } catch (err) {
+      console.warn('[api] deleteDocumentChunks failed:', err);
     }
   },
 
@@ -405,29 +421,46 @@ export const dbApi = {
     return data.id;
   },
 
-  async getRecentQueries(limit = 10): Promise<RecentQuery[]> {
+  async getRecentQueries(limit = 50): Promise<RecentQuery[]> {
     if (!isSupabaseConfigured || !supabase) return [];
-    const userId = await getAuthUserId();
-    if (!userId) return [];
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('id, content, created_at, session_id, chat_sessions(workspace_id, workspaces(name))')
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    // Fetch user messages across all their sessions (joined with session+workspace for names)
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .select('id, content, created_at, chat_sessions(workspace_id, workspaces(name))')
-      .eq('role', 'user')
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      if (error) {
+        const { data: simpleData } = await supabase
+          .from('chat_messages')
+          .select('id, content, created_at')
+          .eq('role', 'user')
+          .order('created_at', { ascending: false })
+          .limit(limit);
 
-    if (error) { console.warn('[api] getRecentQueries:', error.message); return []; }
+        return (simpleData || []).map((row: any) => ({
+          id: row.id,
+          query: row.content,
+          workspaceId: '',
+          workspaceName: 'Workspace',
+          authorName: 'You',
+          timestamp: new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        }));
+      }
 
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      query: row.content,
-      workspaceId: row.chat_sessions?.workspace_id || '',
-      workspaceName: row.chat_sessions?.workspaces?.name || 'Unknown',
-      authorName: 'You',
-      timestamp: new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    }));
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        query: row.content,
+        workspaceId: row.chat_sessions?.workspace_id || '',
+        workspaceName: row.chat_sessions?.workspaces?.name || 'Workspace',
+        authorName: 'You',
+        timestamp: new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      }));
+    } catch (err) {
+      console.warn('[api] getRecentQueries failed:', err);
+      return [];
+    }
   },
 
   // ══════════════════════════════════════════════════════════════════

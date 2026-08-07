@@ -58,11 +58,49 @@ const STOP_WORDS = new Set([
   'up', 'out', 'then', 'than', 'also', 'just', 'any', 'all', 'both', 'each',
 ]);
 
+function stem(word: string): string {
+  // Basic English suffix stemming — handles plurals, -ing, -ed, -tion/-tions, -ment/-ments
+  if (word.endsWith('tions')) return word.slice(0, -1);  // certifications → certification
+  if (word.endsWith('ments')) return word.slice(0, -1);   // achievements → achievement  
+  if (word.endsWith('ings')) return word.slice(0, -4);    // certifyings → certify
+  if (word.endsWith('tion')) return word;                 // keep certification as-is
+  if (word.endsWith('ment')) return word;                 // keep achievement as-is
+  if (word.endsWith('ing')) return word.slice(0, -3);     // running → run
+  if (word.endsWith('ed')) return word.slice(0, -2);      // completed → complet
+  if (word.endsWith('s') && word.length > 4) return word.slice(0, -1); // skills → skill
+  return word;
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .split(/\W+/)
-    .filter(t => t.length > 1 && !STOP_WORDS.has(t));
+    .filter(t => t.length > 1 && !STOP_WORDS.has(t))
+    .map(stem); // Apply stemming to normalise word forms
+}
+
+// ── Query expansion for short / vague queries ────────────────────────────────
+const QUERY_SYNONYMS: Record<string, string[]> = {
+  'certification': ['certificate', 'certified', 'credential', 'accomplishment', 'award', 'achievement'],
+  'certifications': ['certificate', 'certified', 'credential', 'accomplishment', 'award', 'achievement'],
+  'achievement': ['accomplishment', 'award', 'certification', 'honor', 'recognition', 'project'],
+  'achievements': ['accomplishment', 'award', 'certification', 'honor', 'recognition', 'project'],
+  'skill': ['expertise', 'proficiency', 'technology', 'tool', 'language', 'framework'],
+  'skills': ['expertise', 'proficiency', 'technology', 'tool', 'language', 'framework'],
+  'experience': ['work', 'project', 'role', 'position', 'company', 'employment'],
+  'education': ['degree', 'university', 'college', 'cgpa', 'gpa', 'bachelor', 'master'],
+  'project': ['work', 'application', 'system', 'product', 'development', 'built'],
+  'projects': ['work', 'application', 'system', 'product', 'development', 'built'],
+};
+
+function expandQuery(queryTokens: string[]): string[] {
+  if (queryTokens.length > 3) return queryTokens; // Only expand short queries
+  const expanded = new Set(queryTokens);
+  for (const token of queryTokens) {
+    const synonyms = QUERY_SYNONYMS[token] || QUERY_SYNONYMS[token + 's'] || QUERY_SYNONYMS[token.slice(0, -1)];
+    if (synonyms) synonyms.forEach(s => expanded.add(s));
+  }
+  return Array.from(expanded);
 }
 
 // ── Embedding generation ──────────────────────────────────────────────────────
@@ -189,24 +227,39 @@ export async function performHybridSearch(
   workspaceId: string,
   query: string,
   topK = 4,
-  rrfK = 60
+  rrfK = 60,
+  documentFilter?: string[] // Optional: restrict search to specific document IDs
 ): Promise<RetrievalResult[]> {
-  const workspaceChunks = globalVectorIndex.getWorkspaceChunks(workspaceId);
+  let workspaceChunks = globalVectorIndex.getWorkspaceChunks(workspaceId);
   if (workspaceChunks.length === 0) return [];
+
+  // ── Hard Document Filter (before any scoring) ──────────────────────────────
+  if (documentFilter && documentFilter.length > 0) {
+    const filterSet = new Set(documentFilter);
+    workspaceChunks = workspaceChunks.filter(c => filterSet.has(c.documentId));
+    if (workspaceChunks.length === 0) return [];
+  }
+
+  // Internal candidate pool — retrieve 3x topK then rerank to topK
+  // This dramatically improves recall for short / ambiguous queries
+  const candidatePool = Math.max(topK * 3, 12);
 
   // 1. Vector Search (semantic)
   const queryEmbedding = await generateEmbedding(query);
   const vectorScored = workspaceChunks
     .map(chunk => ({ chunk, similarity: cosineSimilarity(queryEmbedding, chunk.embedding) }))
-    .sort((a, b) => b.similarity - a.similarity);
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, candidatePool);
 
-  // 2. BM25 Search (keyword, with stop-word filtering)
-  const queryTokens = tokenize(query);
+  // 2. BM25 Search with query expansion (keyword + synonyms for short queries)
+  const rawQueryTokens = tokenize(query);
+  const expandedQueryTokens = expandQuery(rawQueryTokens);
   const bm25Scored = workspaceChunks
-    .map(chunk => ({ chunk, score: bm25Score(queryTokens, chunk.content) }))
-    .sort((a, b) => b.score - a.score);
+    .map(chunk => ({ chunk, score: bm25Score(expandedQueryTokens, chunk.content) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, candidatePool);
 
-  // 3. Reciprocal Rank Fusion (RRF)
+  // 3. Reciprocal Rank Fusion (RRF) — merges vector + BM25 rankings
   const rrfMap = new Map<string, { chunk: StoredIndexedChunk; score: number; vectorRank: number; bm25Rank: number }>();
 
   vectorScored.forEach((item, index) => {
@@ -219,14 +272,13 @@ export async function performHybridSearch(
 
   bm25Scored.forEach((item, index) => {
     const rank = index + 1;
-    const entry = rrfMap.get(item.chunk.id);
-    if (!entry) return; // shouldn't happen but guard it
-    entry.score += 1 / (rrfK + rank);
-    entry.bm25Rank = rank;
+    const entry = rrfMap.get(item.chunk.id) || { chunk: item.chunk, score: 0, vectorRank: workspaceChunks.length, bm25Rank: index + 1 };
+    entry.score += 1 / (rrfK + (index + 1));
+    entry.bm25Rank = index + 1;
     rrfMap.set(item.chunk.id, entry);
   });
 
-  // 4. Reranker Pass
+  // 4. Cross-Relevance Reranker — uses original raw query for exact-match bonus
   const candidates = Array.from(rrfMap.values())
     .map(item => ({ ...item, rerankScore: computeRerankScore(query, item.chunk.content, item.score) }))
     .sort((a, b) => b.rerankScore - a.rerankScore);

@@ -11,12 +11,14 @@ import {
   Database,
   Layers,
   FolderOpen,
-  Download
+  Download,
+  RefreshCw
 } from 'lucide-react';
 import { storage } from '../../lib/storage';
 
 export const DocumentUploadStudio: React.FC = () => {
-  const { documents, uploadDocument, deleteDocument, userRole, activeWorkspace, workspaces, setActiveScreen } = useApp();
+  const { documents, uploadDocument, deleteDocument, reprocessDocument, userRole, activeWorkspace, workspaces, setActiveScreen } = useApp();
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -327,6 +329,33 @@ export const DocumentUploadStudio: React.FC = () => {
                               <Download size={16} />
                             </button>
                           )}
+
+                          {/* Re-process button: re-chunks doc with latest pipeline */}
+                          {(doc.status === 'ready' || doc.status === 'failed') && !isViewer && (
+                            <button
+                              onClick={async () => {
+                                setReprocessingId(doc.id);
+                                await reprocessDocument(doc.id);
+                                setReprocessingId(null);
+                              }}
+                              disabled={reprocessingId === doc.id}
+                              title="Re-process with latest chunking pipeline"
+                              style={{
+                                background: 'none', border: 'none',
+                                cursor: reprocessingId === doc.id ? 'not-allowed' : 'pointer',
+                                color: reprocessingId === doc.id ? '#2563eb' : '#8e8e93',
+                                transition: 'color 0.15s', padding: 6, borderRadius: 6
+                              }}
+                              onMouseEnter={(e) => { if (reprocessingId !== doc.id) e.currentTarget.style.color = '#059669'; }}
+                              onMouseLeave={(e) => { if (reprocessingId !== doc.id) e.currentTarget.style.color = '#8e8e93'; }}
+                            >
+                              <RefreshCw
+                                size={15}
+                                style={reprocessingId === doc.id ? { animation: 'spin 1s linear infinite' } : undefined}
+                              />
+                            </button>
+                          )}
+
                           <button
                             onClick={() => deleteDocument(doc.id)}
                             disabled={isViewer}
@@ -352,8 +381,9 @@ export const DocumentUploadStudio: React.FC = () => {
         )}
       </div>
 
-
-
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
 
     </div>
   );

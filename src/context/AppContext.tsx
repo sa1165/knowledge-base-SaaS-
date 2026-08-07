@@ -3,6 +3,7 @@ import { processDocumentIngestion } from '../lib/ingestion/pipeline';
 import { performHybridSearch, RetrievalResult, globalVectorIndex } from '../lib/rag/hybrid-retrieval';
 import { generateGroundedResponse } from '../lib/rag/llm-provider';
 import { dbApi } from '../lib/api';
+import { storage } from '../lib/storage';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 export type UserRole = 'owner' | 'editor' | 'viewer';
@@ -94,6 +95,7 @@ interface AppContextType {
   documents: DocumentItem[];
   uploadDocument: (file: File) => Promise<void>;
   deleteDocument: (docId: string) => Promise<void>;
+  reprocessDocument: (docId: string) => Promise<void>; // Re-chunk with latest pipeline
 
   // Chat Sessions & Messages
   chatSessions: ChatSessionItem[];
@@ -106,6 +108,10 @@ interface AppContextType {
   renameChatSession: (sessionId: string, newTitle: string) => Promise<void>;
   deleteChatSession: (sessionId: string) => Promise<void>;
   switchChatSession: (sessionId: string) => Promise<void>;
+
+  // Document Scope Filter (per-chat document selector)
+  selectedDocumentIds: string[];         // empty = search all documents
+  setSelectedDocumentIds: (ids: string[]) => void;
 
   // Navigation
   activeScreen: AppScreen;
@@ -130,6 +136,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string }>({ name: 'User', email: '' });
 
   const chatSessionRef = useRef<string | null>(null);
@@ -158,31 +165,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSessionId(null);
     chatSessionRef.current = null;
 
-    const [dbDocs, dbMembers, dbSessions, dbChunks] = await Promise.all([
+    const [dbDocs, dbMembers, dbSessions, dbChunks, dbQueries] = await Promise.all([
       dbApi.getDocuments(workspaceId),
       dbApi.getMembers(workspaceId),
       dbApi.getChatSessions(workspaceId),
       dbApi.getWorkspaceChunks(workspaceId),
+      dbApi.getRecentQueries(50),
     ]);
     setDocuments(dbDocs);
     setMembers(dbMembers);
-    setChatSessions(dbSessions);
+    // Filter out any legacy empty 'New Chat' sessions from DB list
+    const validSessions = dbSessions.filter(s => s.title !== 'New Chat' && s.title !== 'Chat');
+    setChatSessions(validSessions);
+    setRecentQueries(dbQueries);
 
-    if (dbSessions.length > 0) {
-      const currentId = dbSessions[0].id;
-      setActiveSessionId(currentId);
-      chatSessionRef.current = currentId;
-      const dbMsgs = await dbApi.getChatMessagesForSession(currentId);
-      setMessages(dbMsgs);
-    } else {
-      const newSession = await dbApi.createChatSession(workspaceId, 'New Chat');
-      if (newSession) {
-        setChatSessions([newSession]);
-        setActiveSessionId(newSession.id);
-        chatSessionRef.current = newSession.id;
-        setMessages([]);
-      }
-    }
+    // Default to clean empty chat state (session created only when user sends a query)
+    setActiveSessionId(null);
+    chatSessionRef.current = null;
+    setMessages([]);
 
     // Hydrate in-memory RAG index with chunks persisted in Supabase
     if (dbChunks && dbChunks.length > 0) {
@@ -354,6 +354,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  /**
+   * Re-processes an existing document with the current (latest) chunking pipeline.
+   * Useful when the chunker has been improved and existing docs need re-indexing.
+   * Fetches the raw file from Supabase Storage, deletes old chunks, re-ingests.
+   */
+  const reprocessDocument = async (docId: string) => {
+    if (!activeWorkspace) return;
+    const doc = documents.find(d => d.id === docId);
+    if (!doc) return;
+
+    setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: 'processing' } : d));
+    await dbApi.updateDocumentStatus(docId, 'processing', 0);
+
+    try {
+      // Fetch raw file bytes from Supabase Storage
+      const storageKey = `workspaces/${activeWorkspace.id}/documents/${docId}-${doc.filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const fileData = await storage.downloadFile(storageKey);
+      if (!fileData) throw new Error('Could not download file from storage');
+
+      // Evict old chunks from in-memory index
+      globalVectorIndex.removeDocumentChunks(docId);
+      // Delete old chunks from Supabase
+      await dbApi.deleteDocumentChunks(docId);
+
+      // Re-run with current (improved) pipeline
+      const result = await processDocumentIngestion(activeWorkspace.id, docId, doc.filename, fileData, doc.mimeType);
+
+      setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: result.status, chunkCount: result.chunkCount } : d));
+      await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount);
+    } catch (err: any) {
+      console.error('[reprocessDocument] Error:', err);
+      setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: 'failed' } : d));
+      await dbApi.updateDocumentStatus(docId, 'failed', 0);
+    }
+  };
+
   const deleteDocument = async (docId: string) => {
     if (userRole === 'viewer') { alert('Permission Denied: Viewer role cannot delete documents.'); return; }
     await dbApi.deleteDocument(docId);
@@ -376,14 +412,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ══════════════════════════════════════════════════════════════════
 
   const createNewChatSession = async () => {
-    if (!activeWorkspace) return;
-    const newSession = await dbApi.createChatSession(activeWorkspace.id, 'New Chat');
-    if (newSession) {
-      setChatSessions(prev => [newSession, ...prev]);
-      setActiveSessionId(newSession.id);
-      chatSessionRef.current = newSession.id;
-      setMessages([]);
-    }
+    setActiveSessionId(null);
+    chatSessionRef.current = null;
+    setMessages([]);
   };
 
   const renameChatSession = async (sessionId: string, newTitle: string) => {
@@ -397,26 +428,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setChatSessions(nextSessions);
 
     if (activeSessionId === sessionId) {
-      if (nextSessions.length > 0) {
-        await switchChatSession(nextSessions[0].id);
-      } else {
-        await createNewChatSession();
-      }
+      await createNewChatSession();
     }
   };
 
   const switchChatSession = async (sessionId: string) => {
-    setActiveSessionId(sessionId);
     chatSessionRef.current = sessionId;
     const msgs = await dbApi.getChatMessagesForSession(sessionId);
+    // Batch both updates together AFTER the await so React 18 processes them in one render.
+    setActiveSessionId(sessionId);
     setMessages(msgs);
   };
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || !activeWorkspace) return;
 
+    // Create database session ONLY on the first message sent
     if (!chatSessionRef.current) {
-      const session = await dbApi.createChatSession(activeWorkspace.id, 'New Chat');
+      const autoTitle = text.length > 32 ? text.slice(0, 32) + '...' : text;
+      const session = await dbApi.createChatSession(activeWorkspace.id, autoTitle);
       if (session) {
         chatSessionRef.current = session.id;
         setActiveSessionId(session.id);
@@ -450,9 +480,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setRecentQueries(prev => [newRq, ...prev]);
 
+    // Keep recent queries synced with Supabase in background
+    dbApi.getRecentQueries(50).then(queries => {
+      if (queries && queries.length > 0) setRecentQueries(queries);
+    });
+
     setIsSending(true);
     try {
-      const sources = await performHybridSearch(activeWorkspace.id, text, 4, 60);
+      // Pass selectedDocumentIds as hard filter — empty array means search all docs
+      // topK=6: retrieve 6 best chunks to give LLM enough context across all sections
+      const sources = await performHybridSearch(
+        activeWorkspace.id,
+        text,
+        6,
+        60,
+        selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined
+      );
 
       if (sources.length === 0) {
         const noContextMsg = "Based on your uploaded documents, I could not find relevant information to answer this query. Please ensure your documents are fully indexed (status: Ready) before asking questions.";
@@ -510,10 +553,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       workspaces, activeWorkspace, setActiveWorkspace, addWorkspace, updateWorkspaceDetails, deleteAllWorkspaceDocuments, deleteWorkspace,
       members: activeWorkspaceMembers, addMember, updateMemberRole, removeMember,
       currentUser, userRole, setUserRole,
-      documents, uploadDocument, deleteDocument,
+      documents, uploadDocument, deleteDocument, reprocessDocument,
       chatSessions: activeWorkspace ? chatSessions.filter(s => s.workspaceId === activeWorkspace.id) : [],
       activeSessionId, messages, recentQueries, sendMessage, isSending,
       createNewChatSession, renameChatSession, deleteChatSession, switchChatSession,
+      selectedDocumentIds, setSelectedDocumentIds,
       activeScreen, setActiveScreen, activeTab, setActiveTab
     }}>
       {children}

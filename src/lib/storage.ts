@@ -8,6 +8,7 @@ export interface StorageProvider {
   uploadFile(key: string, data: Uint8Array | ArrayBuffer | Blob | string, mimeType: string): Promise<string>;
   getPublicUrl(key: string): string | null;
   deleteFile(key: string): Promise<void>;
+  downloadFile(key: string): Promise<ArrayBuffer | null>;
 }
 
 class SupabaseStorageDriver implements StorageProvider {
@@ -54,6 +55,23 @@ class SupabaseStorageDriver implements StorageProvider {
       }
     }
     this.localFallback.delete(key);
+  }
+
+  async downloadFile(key: string): Promise<ArrayBuffer | null> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.storage.from(this.bucket).download(key);
+        if (error || !data) throw error;
+        return await data.arrayBuffer();
+      } catch (err) {
+        console.warn(`[storage] Supabase download failed for ${key}:`, err);
+      }
+    }
+    // Local fallback: retrieve from in-memory store
+    const local = this.localFallback.get(key);
+    if (local instanceof ArrayBuffer) return local;
+    if (local instanceof Blob) return await local.arrayBuffer();
+    return null;
   }
 }
 

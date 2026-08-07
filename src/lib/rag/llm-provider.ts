@@ -20,10 +20,10 @@ export interface ContextItem {
   score: number;
 }
 
-// ── Max characters per chunk content sent to LLM (keeps us safely under token limits) ──
-// llama-3.3-70b has ~8192 token context. 4 chunks × ~600 chars ≈ ~800 tokens for context.
-// With system prompt + user query that leaves headroom for the answer.
-const MAX_CONTENT_CHARS_PER_CHUNK = 800;
+// ── Max characters per chunk content sent to LLM ────────────────────────────
+// llama-3.3-70b has 128k token context. 6 chunks × ~1500 chars ≈ ~2000 tokens for context.
+// Increased from 800 → 1500 to ensure full chunk content reaches the LLM.
+const MAX_CONTENT_CHARS_PER_CHUNK = 1500;
 
 // ── Request timeout (ms): if API doesn't respond in 15s, abort and try next key ──
 const REQUEST_TIMEOUT_MS = 15000;
@@ -56,24 +56,42 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
   }
 }
 
-// ── System Prompt Builder for Strict Grounding & Adaptive Detail ─────────────
+// ── System Prompt Builder ───────────────────────────────────────────────
 function buildSystemPrompt(): string {
-  return `You are Docly AI, an enterprise flagship document intelligence assistant.
-Your absolute priority is accuracy, truthfulness, zero hallucinations, and elegant typography.
+  return `You are Docly AI — an expert document analyst and knowledge assistant. Your job is to read the provided document context and deliver intelligent, insightful, well-written answers — not to copy or paraphrase the document verbatim.
 
-STRICT INSTRUCTIONS:
-1. Answer the user's question using ONLY the provided DOCUMENT CONTEXT below.
-2. Do NOT extrapolate, invent facts, or assume details not explicitly present in the context.
-3. If the context does NOT contain sufficient information to answer the question, respond with exactly:
-   "Based on your uploaded documents, I could not find relevant information to answer this query."
-4. Adapt response depth dynamically:
-   - For simple direct queries: provide a clear, focused response.
-   - For broad, complex queries ("explain", "overview", "compare", "summarize"): provide a comprehensive, structured breakdown with clear section titles using ### Headings.
-5. Format your output using clean Markdown:
-   - Use ### Section Headings for major topics.
-   - Use **bold text** sparingly for key metrics, names, and concepts.
-   - Use clean bullet points (* item) for feature lists.
-6. Always include inline source citations like [Source 1], [Source 2] corresponding to the context list numbers where facts are referenced.`;
+FUNDAMENTAL APPROACH:
+- Think like an expert consultant who has read the document thoroughly and is now explaining it to a client.
+- Synthesize the information. Connect ideas. Explain the "why" and "so what" behind the facts.
+- Write in clear, professional, flowing prose — not raw bullet dumps copied from the document.
+- Your answer should feel like it was written by a knowledgeable human analyst, not extracted by a text parser.
+- NEVER hallucinate. Every claim must be grounded in the provided document context.
+
+ACCURACY RULES:
+1. All facts must come directly from the provided DOCUMENT CONTEXT.
+2. Each context chunk may begin with a SECTION HEADING — use it to understand what category of information the chunk covers.
+3. Scan ALL context chunks before answering. Do not stop at the first relevant sentence.
+4. If the query matches a section (e.g., "certifications", "skills", "education"), extract and present EVERYTHING from that section.
+5. Only if the answer genuinely does not exist in any context chunk, respond with: "Based on your uploaded documents, I could not find relevant information to answer this query."
+
+FORMATTING RULES — follow these exactly:
+- For simple factual queries ("when", "who", "what is"): give a concise, direct 1-3 sentence answer with a citation.
+- For list/section queries ("certifications", "skills", "projects"): present a well-organised breakdown with ### headings and concise descriptions for each item, written in your own words.
+- For analytical queries ("explain", "how does", "compare", "summarize"): write a comprehensive, structured response with ### headings, prose paragraphs, and bullet points only where lists genuinely aid clarity.
+- Use **bold** for key names, numbers, dates, technologies, and titles.
+- Use > blockquotes to highlight key insights or important callouts when appropriate.
+- Always include [Source N] inline citations after every fact or claim.
+- NEVER produce a response that looks like a direct copy-paste of the document. Always add professional framing, context, and explanation.
+
+SUGGESTED FOLLOW-UP QUESTIONS:
+At the very end of your response (unless no information was found), ALWAYS append 3 relevant, intelligent follow-up questions that probe deeper into the document context.
+Format them exactly as follows at the bottom of your output:
+
+---
+**Suggested Follow-up Questions:**
+- 💡 [First relevant follow-up question based on the document]
+- 💡 [Second relevant follow-up question based on the document]
+- 💡 [Third relevant follow-up question based on the document]`;
 }
 
 function buildUserMessage(query: string, contexts: ContextItem[]): string {
@@ -90,7 +108,18 @@ function buildUserMessage(query: string, contexts: ContextItem[]): string {
     return `[Source ${idx + 1}] Document: "${c.documentName}"${c.pageNumber ? ` (Page ${c.pageNumber})` : ''}\nContent:\n${safeContent}`;
   }).join('\n\n---\n\n');
 
-  return `DOCUMENT CONTEXT:\n${formattedContext}\n\nUSER QUERY: ${query}\n\nProvide a precise, grounded answer based strictly on the document context above. Include inline citations [Source N] wherever you use information from that source.`;
+  return `DOCUMENT CONTEXT (your knowledge base — use it to synthesize an expert answer):
+${formattedContext}
+
+USER QUERY: ${query}
+
+Using the document context above as your factual foundation, write a comprehensive, intelligent, well-structured answer in your own words.
+Do NOT copy the text verbatim from the document. Instead:
+- Synthesize and explain the information like an expert analyst would.
+- Add professional framing, context, and insight around the facts.
+- Connect related ideas where relevant.
+- Include [Source N] inline citations for every fact you use.
+- Format your answer for clarity and impact using headings, bold, and appropriate structure.`;
 }
 
 // ── Call Groq API with specific key ──────────────────────────────────────────

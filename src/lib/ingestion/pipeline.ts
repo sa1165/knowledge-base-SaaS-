@@ -30,29 +30,35 @@ export async function processDocumentIngestion(
       throw new Error('Extracted document text is empty.');
     }
 
-    // 3. Chunk text into token blocks
-    const chunks = chunkText(parsed.text, 400, 50);
+    // 3. Chunk text into semantically-bounded blocks
+    const chunks = chunkText(parsed.text, 250, 60);
 
-    // 4. Generate embeddings and index chunks
+    // 4. Generate embeddings and index chunks (batched for high-throughput 500+ page PDFs)
     const indexedChunks: StoredIndexedChunk[] = [];
     const dbChunks: { chunkIndex: number; content: string; embedding?: number[]; pageNumber?: number }[] = [];
 
-    for (const c of chunks) {
-      const embedding = await generateEmbedding(c.content);
-      indexedChunks.push({
-        id: `chk-${documentId}-${c.chunkIndex}`,
-        documentId,
-        documentName: filename,
-        workspaceId,
-        content: c.content,
-        embedding,
-        pageNumber: c.pageNumber
-      });
-      dbChunks.push({
-        chunkIndex: c.chunkIndex,
-        content: c.content,
-        embedding,
-        pageNumber: c.pageNumber
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const chunkBatch = chunks.slice(i, i + BATCH_SIZE);
+      const embeddings = await Promise.all(chunkBatch.map(c => generateEmbedding(c.content)));
+
+      chunkBatch.forEach((c, idx) => {
+        const embedding = embeddings[idx];
+        indexedChunks.push({
+          id: `chk-${documentId}-${c.chunkIndex}`,
+          documentId,
+          documentName: filename,
+          workspaceId,
+          content: c.content,
+          embedding,
+          pageNumber: c.pageNumber
+        });
+        dbChunks.push({
+          chunkIndex: c.chunkIndex,
+          content: c.content,
+          embedding,
+          pageNumber: c.pageNumber
+        });
       });
     }
 

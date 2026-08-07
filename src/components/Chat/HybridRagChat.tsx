@@ -3,8 +3,34 @@ import { useApp, ChatMessage, ChatSessionItem } from '../../context/AppContext';
 import { RetrievalResult } from '../../lib/rag/hybrid-retrieval';
 import {
   Send, Bot, FileText, X, Search, Plus, Trash2, Edit2, Check,
-  CheckCircle2, AlertCircle, Loader2, Sparkles, BookOpen, MessageSquare, History, User
+  CheckCircle2, AlertCircle, Loader2, Sparkles, BookOpen, MessageSquare, History, User,
+  HelpCircle, ArrowRight
 } from 'lucide-react';
+
+function parseFollowUpQuestions(content: string): { cleanContent: string; followUps: string[] } {
+  if (!content) return { cleanContent: '', followUps: [] };
+
+  const markerMatch = content.match(/---[\s\S]*?\*?\*?Suggested Follow-up Questions:?\*?\*?/i) || content.match(/\*?\*?Suggested Follow-up Questions:?\*?\*?/i);
+  if (!markerMatch) return { cleanContent: content, followUps: [] };
+
+  const splitIdx = markerMatch.index !== undefined ? markerMatch.index : content.length;
+  const cleanContent = content.slice(0, splitIdx).replace(/---\s*$/, '').trim();
+  const followUpBlock = content.slice(splitIdx);
+
+  const lines = followUpBlock.split('\n');
+  const followUps: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('-') || trimmed.startsWith('*') || /^\d+\./.test(trimmed)) {
+      const q = trimmed.replace(/^[-*\d.]+\s*(💡)?\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
+      if (q.length > 5 && !q.toLowerCase().includes('suggested follow-up')) {
+        followUps.push(q);
+      }
+    }
+  }
+
+  return { cleanContent, followUps };
+}
 
 // ── Document Status Dot Indicator ─────────────────────────────────
 const StatusDot: React.FC<{ status: 'ready' | 'processing' | 'uploading' | 'failed' }> = ({ status }) => {
@@ -134,7 +160,8 @@ export const HybridRagChat: React.FC = () => {
   const {
     messages, sendMessage, isSending, activeWorkspace, documents, setActiveScreen,
     chatSessions, activeSessionId, createNewChatSession, renameChatSession,
-    deleteChatSession, switchChatSession
+    deleteChatSession, switchChatSession,
+    selectedDocumentIds, setSelectedDocumentIds
   } = useApp();
 
   const [input, setInput] = useState('');
@@ -145,27 +172,48 @@ export const HybridRagChat: React.FC = () => {
   const [allSources, setAllSources] = useState<RetrievalResult[]>([]);
   const [sourceOpen, setSourceOpen] = useState(false);
 
-  // Typewriter streaming state for assistant answers
-  const [streamingText, setStreamingText] = useState('');
+  // ── Typewriter streaming — only fires for messages the user just sent ──────
+  // Rule: historical messages (from DB) render instantly. New live messages animate.
+  const isLiveTyping = useRef(false);          // set true in handleSubmit, cleared after animation starts
+  const [streamingText, setStreamingText] = useState<string>('');
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Scroll only when a new message is added or session switches
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, activeSessionId]);
 
-  // Handle Typewriter Animation for the latest Assistant message
+  // When session switches or messages first load, immediately show all messages in full
+  // (activeSessionId + messages update in the same React batch now, so this is always correct)
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') {
+      setStreamingMsgId(last.id);
+      setStreamingText(last.content);
+    } else {
+      setStreamingMsgId(null);
+      setStreamingText('');
+    }
+  }, [activeSessionId]);
+
+  // Fire typewriter ONLY for live messages the user just sent
   const lastMsg = messages[messages.length - 1];
   useEffect(() => {
-    if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id !== streamingMsgId) {
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+    if (lastMsg.id === streamingMsgId) return; // already shown
+
+    if (isLiveTyping.current) {
+      // User just sent this — animate it
+      isLiveTyping.current = false;
       setStreamingMsgId(lastMsg.id);
       const fullText = lastMsg.content;
       let currIdx = 0;
       setStreamingText('');
 
       const interval = setInterval(() => {
-        currIdx += 4; // 4 characters per 15ms frame for smooth fast typing
+        currIdx += 4;
         if (currIdx >= fullText.length) {
           setStreamingText(fullText);
           clearInterval(interval);
@@ -175,6 +223,10 @@ export const HybridRagChat: React.FC = () => {
       }, 15);
 
       return () => clearInterval(interval);
+    } else {
+      // Loaded from DB — show immediately, no animation
+      setStreamingMsgId(lastMsg.id);
+      setStreamingText(lastMsg.content);
     }
   }, [lastMsg?.id]);
 
@@ -191,6 +243,7 @@ export const HybridRagChat: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isSending || !activeWorkspace) return;
+    isLiveTyping.current = true; // Mark next assistant reply for typewriter animation
     const q = input.trim();
     setInput('');
     sendMessage(q);
@@ -214,9 +267,9 @@ export const HybridRagChat: React.FC = () => {
     setEditingSessionId(null);
   };
 
-  const filteredSessions = chatSessions.filter(s =>
-    s.title.toLowerCase().includes(sessionSearch.toLowerCase())
-  );
+  const filteredSessions = chatSessions
+    .filter(s => s.title !== 'New Chat' && s.title !== 'Chat')
+    .filter(s => s.title.toLowerCase().includes(sessionSearch.toLowerCase()));
 
   const workspaceDocs = activeWorkspace
     ? documents.filter(d => d.workspaceId === activeWorkspace.id)
@@ -246,12 +299,12 @@ export const HybridRagChat: React.FC = () => {
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#fcfcfb' }}>
+    <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#fcfcfb', height: '100%' }}>
 
       {/* ── LEFT: ChatGPT-Style Chat Sessions Sidebar ────────────────────────── */}
       <div style={{
         width: 250, flexShrink: 0, background: '#ffffff', borderRight: '1px solid #eaeaea',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden'
+        display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%'
       }}>
         
         {/* Top Action Bar */}
@@ -363,15 +416,74 @@ export const HybridRagChat: React.FC = () => {
           )}
         </div>
 
-        {/* Workspace Document Count Footer */}
-        <div style={{ padding: '12px 14px', borderTop: '1px solid #f4f4f3', fontSize: 11, color: '#8e8e93', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <FileText size={13} color="#8e8e93" />
-          <span>{readyCount} document{readyCount !== 1 ? 's' : ''} ready</span>
+        {/* ── Document Scope Selector ──────────────────────────────── */}
+        <div style={{ borderTop: '1px solid #f4f4f3', flexShrink: 0 }}>
+          <div style={{ padding: '10px 14px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <FileText size={11} color="#8e8e93" /> Query Scope
+            </div>
+            {selectedDocumentIds.length > 0 && (
+              <button
+                onClick={() => setSelectedDocumentIds([])}
+                style={{ background: 'none', border: 'none', fontSize: 10, color: '#2563eb', cursor: 'pointer', fontWeight: 600, padding: 0 }}
+              >
+                All Docs
+              </button>
+            )}
+          </div>
+          <div style={{ padding: '0 10px 12px', display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+            {workspaceDocs.filter(d => d.status === 'ready').map(doc => {
+              const isSelected = selectedDocumentIds.includes(doc.id);
+              return (
+                <button
+                  key={doc.id}
+                  onClick={() => {
+                    setSelectedDocumentIds(
+                      isSelected
+                        ? selectedDocumentIds.filter(id => id !== doc.id)
+                        : [...selectedDocumentIds, doc.id]
+                    );
+                  }}
+                  title={doc.filename}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                    borderRadius: 7, border: isSelected ? '1.5px solid #2563eb' : '1.5px solid #eaeaea',
+                    background: isSelected ? '#eff6ff' : '#f9f9f8',
+                    cursor: 'pointer', textAlign: 'left', width: '100%'
+                  }}
+                >
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                    background: isSelected ? '#2563eb' : '#e5e5e3',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    {isSelected && <Check size={10} color="#ffffff" strokeWidth={3} />}
+                  </div>
+                  <span style={{
+                    fontSize: 11.5, fontWeight: isSelected ? 600 : 500,
+                    color: isSelected ? '#2563eb' : '#374151',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1
+                  }}>
+                    {doc.filename.length > 22 ? doc.filename.slice(0, 22) + '...' : doc.filename}
+                  </span>
+                </button>
+              );
+            })}
+            {workspaceDocs.filter(d => d.status === 'ready').length === 0 && (
+              <div style={{ fontSize: 11, color: '#8e8e93', padding: '4px 8px' }}>No documents ready</div>
+            )}
+          </div>
+          {selectedDocumentIds.length > 0 && (
+            <div style={{ padding: '0 14px 10px', fontSize: 10.5, color: '#059669', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#059669', display: 'inline-block' }} />
+              Scoped to {selectedDocumentIds.length} doc{selectedDocumentIds.length > 1 ? 's' : ''}
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── CENTER: Chat Messages Stream & Typewriter ────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%', minHeight: 0 }}>
 
         {/* Top Header Bar */}
         <div style={{
@@ -394,7 +506,7 @@ export const HybridRagChat: React.FC = () => {
         </div>
 
         {/* Message Stream */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0 }}>
 
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', margin: 'auto', maxWidth: 420 }}>
@@ -415,8 +527,9 @@ export const HybridRagChat: React.FC = () => {
 
           {messages.map((msg, idx) => {
             const isLatestAssistant = msg.role === 'assistant' && idx === messages.length - 1;
-            const contentToDisplay = isLatestAssistant ? streamingText : msg.content;
+            const rawContentToDisplay = isLatestAssistant ? streamingText : msg.content;
             const isTyping = isLatestAssistant && streamingText.length < msg.content.length;
+            const { cleanContent, followUps } = parseFollowUpQuestions(rawContentToDisplay);
 
             return (
               <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: 6 }}>
@@ -440,7 +553,7 @@ export const HybridRagChat: React.FC = () => {
                     ) : (
                       <>
                         <MarkdownRenderer
-                          content={contentToDisplay}
+                          content={cleanContent}
                           onCitationClick={(srcIdx) => msg.sources && msg.sources[srcIdx] && handleOpenSource(msg.sources[srcIdx], msg.sources)}
                         />
                         {isTyping && (
@@ -468,6 +581,36 @@ export const HybridRagChat: React.FC = () => {
                             [{sIdx + 1}] {src.documentName} {src.pageNumber ? `(p. ${src.pageNumber})` : ''}
                           </button>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Interactive Suggested Follow-up Questions Pills */}
+                    {msg.role === 'assistant' && !isTyping && followUps.length > 0 && (
+                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px dashed #e5e5e3' }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#4b5563', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <Sparkles size={13} color="#2563eb" /> Suggested Follow-ups:
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {followUps.map((questionText, qIdx) => (
+                            <button
+                              key={qIdx}
+                              onClick={() => sendMessage(questionText)}
+                              disabled={isSending}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                                borderRadius: 8, border: '1px solid #dbeafe', background: '#eff6ff',
+                                color: '#1e40af', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                                textAlign: 'left', transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe'; e.currentTarget.style.borderColor = '#93c5fd'; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.borderColor = '#dbeafe'; }}
+                            >
+                              <span style={{ fontSize: 13 }}>💡</span>
+                              <span style={{ flex: 1 }}>{questionText}</span>
+                              <ArrowRight size={13} color="#3b82f6" />
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

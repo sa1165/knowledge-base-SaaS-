@@ -40,7 +40,7 @@ const InnerDashboard: React.FC = () => {
   const {
     workspaces, activeWorkspace, setActiveWorkspace, addWorkspace,
     currentUser, userRole,
-    activeScreen, setActiveScreen,
+    activeScreen, setActiveScreen, createNewChatSession
   } = useApp();
   const { signOut, user } = useAuth();
   const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || currentUser.name;
@@ -218,7 +218,13 @@ const InnerDashboard: React.FC = () => {
             return (
               <button
                 key={item.screen}
-                onClick={() => { setActiveScreen(item.screen); setWsDropdown(false); }}
+                onClick={() => {
+                  if (item.screen === 'chat') {
+                    createNewChatSession();
+                  }
+                  setActiveScreen(item.screen);
+                  setWsDropdown(false);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: sidebarOpen ? '9px 12px' : '9px',
@@ -295,8 +301,14 @@ const InnerDashboard: React.FC = () => {
       </div>
 
       {/* ── MAIN SCREEN DISPLAY ─────────────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <div style={{ flex: 1, overflow: activeScreen === 'chat' ? 'hidden' : 'auto' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+        <div style={{
+          flex: 1,
+          overflow: activeScreen === 'chat' ? 'hidden' : 'auto',
+          display: activeScreen === 'chat' ? 'flex' : 'block',
+          flexDirection: activeScreen === 'chat' ? 'column' : undefined,
+          minHeight: 0,
+        }}>
           {activeScreen === 'workspaces' && <WorkspacesDashboard />}
           {activeScreen === 'chat'       && <HybridRagChat />}
           {activeScreen === 'documents'  && <DocumentUploadStudio />}

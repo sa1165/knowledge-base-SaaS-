@@ -14,7 +14,15 @@ export interface ParsedDocument {
 }
 
 /**
- * Native Browser-Safe PDF Text Extractor using PDF.js + local bundled worker
+ * Native Browser-Safe PDF Text Extractor using PDF.js + local bundled worker.
+ *
+ * KEY IMPROVEMENT over previous version:
+ * Groups text items by y-coordinate to reconstruct proper line breaks.
+ * Previously all items were joined with ' ' (space), turning:
+ *   "CERTIFICATIONS & ACHIEVEMENTS\nFinalist — Layer 3.0..."
+ * into:
+ *   "CERTIFICATIONS & ACHIEVEMENTS Finalist — Layer 3.0..."
+ * which caused the chunker's section heading detector to fail.
  */
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   try {
@@ -31,10 +39,39 @@ async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string;
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
       const page = await pdfDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str || '')
-        .join(' ');
 
+      // ── Group text items by their y-coordinate to reconstruct lines ──────────
+      // PDF items on the same visual line share the same (or very close) y-value.
+      // We bucket items within 3px of each other as the same line.
+
+      type TextItem = { str: string; transform: number[] };
+      const items = textContent.items as TextItem[];
+
+      if (items.length === 0) continue;
+
+      // Build a map: roundedY → [items in reading order]
+      const lineMap = new Map<number, string[]>();
+      for (const item of items) {
+        if (!item.str || item.str.trim() === '') continue;
+        // transform[5] is the y-coordinate in PDF user space
+        const rawY = item.transform ? item.transform[5] : 0;
+        // Round to nearest 3px bucket to merge items on the same visual line
+        const bucketY = Math.round(rawY / 3) * 3;
+        if (!lineMap.has(bucketY)) lineMap.set(bucketY, []);
+        lineMap.get(bucketY)!.push(item.str);
+      }
+
+      // Sort buckets by descending y (PDF y=0 is bottom; higher y = higher on page)
+      const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+      const pageLines: string[] = [];
+      for (const y of sortedYs) {
+        const lineText = lineMap.get(y)!.join(' ').trim();
+        if (lineText.length > 0) {
+          pageLines.push(lineText);
+        }
+      }
+
+      const pageText = pageLines.join('\n');
       if (pageText.trim().length > 0) {
         textParts.push(`--- Page ${pageNum} ---\n${pageText}`);
       }
@@ -42,7 +79,7 @@ async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string;
 
     const fullText = textParts.join('\n\n').trim();
     if (fullText.length > 0) {
-      console.log(`[Parser] Successfully extracted ${fullText.length} characters across ${pageCount} pages using PDF.js worker`);
+      console.log(`[Parser] Extracted ${fullText.length} chars across ${pageCount} pages with line-aware grouping`);
       return { text: fullText, pageCount };
     }
   } catch (err: any) {
@@ -58,7 +95,7 @@ async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string;
 }
 
 /**
- * Stream Text Extractor (Extracts human-readable text blocks from PDF stream objects)
+ * Stream Text Extractor (fallback for non-standard PDFs)
  */
 function extractTextFromPdfStreams(uint8: Uint8Array): string {
   const decoder = new TextDecoder('latin1');
@@ -71,7 +108,7 @@ function extractTextFromPdfStreams(uint8: Uint8Array): string {
     if (
       raw.length > 2 &&
       !/^(PDF|Catalog|Pages|Page|Font|Encoding|Type|Parent|Kids|Root|Info|CreationDate|ModDate|Producer|Title|Author|Subject|Keywords|ProcSet|MediaBox|CropBox|Resources)$/i.test(raw) &&
-      !/^[\d\s\/<>\-.]*$/.test(raw) &&
+      !/^[\d\s\/\<\>\-.]*$/.test(raw) &&
       /^[\x20-\x7E\s]{3,}$/.test(raw)
     ) {
       textBlocks.push(raw);
