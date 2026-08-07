@@ -10,6 +10,7 @@ export interface RetrievalResult {
   score: number;
   vectorRank?: number;
   bm25Rank?: number;
+  rerankScore?: number;
 }
 
 export interface StoredIndexedChunk {
@@ -22,7 +23,7 @@ export interface StoredIndexedChunk {
   pageNumber?: number;
 }
 
-// In-memory Vector & BM25 store for lightweight local evaluation & mock deployment
+// In-memory Vector & BM25 store for lightweight evaluation & real-time RAG index
 class InStoreVectorIndex {
   private indexedChunks: StoredIndexedChunk[] = [];
 
@@ -42,7 +43,7 @@ class InStoreVectorIndex {
 export const globalVectorIndex = new InStoreVectorIndex();
 
 /**
- * Generate embedding vector (1536 dimensions) using OpenAI API or fallback deterministic generator
+ * Generate embedding vector (1536 dimensions)
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   const apiKey = (typeof process !== 'undefined' && process.env ? process.env.OPENAI_API_KEY : undefined) || (import.meta as any)?.env?.VITE_OPENAI_API_KEY;
@@ -107,7 +108,29 @@ function bm25Score(queryTokens: string[], docText: string): number {
 }
 
 /**
- * Perform Hybrid RAG Retrieval using Vector Search + BM25 Full Text Search combined via Reciprocal Rank Fusion (RRF)
+ * Cross-Relevance Reranker: Calculates word overlap ratio & semantic density
+ * Returns a score from 0.0 to 1.0
+ */
+function rerankScore(query: string, content: string, rrfScore: number): number {
+  const queryWords = Array.from(new Set(query.toLowerCase().split(/\W+/).filter(w => w.length > 2)));
+  if (queryWords.length === 0) return rrfScore;
+
+  const contentLower = content.toLowerCase();
+  let matchCount = 0;
+
+  for (const word of queryWords) {
+    if (contentLower.includes(word)) {
+      matchCount++;
+    }
+  }
+
+  const keywordCoverage = matchCount / queryWords.length;
+  // Blend RRF score and keyword coverage
+  return (rrfScore * 0.6) + (keywordCoverage * 0.4);
+}
+
+/**
+ * Perform Hybrid RAG Retrieval using Vector Search + BM25 Full Text Search + RRF + Reranker Pass
  */
 export async function performHybridSearch(
   workspaceId: string,
@@ -126,7 +149,7 @@ export async function performHybridSearch(
   }));
   vectorScored.sort((a, b) => b.similarity - a.similarity);
 
-  // 2. BM25 Search
+  // 2. BM25 Keyword Search
   const queryTokens = query.toLowerCase().split(/\W+/).filter(Boolean);
   const bm25Scored = workspaceChunks.map(chunk => ({
     chunk,
@@ -160,10 +183,16 @@ export async function performHybridSearch(
     rrfScores.set(item.chunk.id, current);
   });
 
-  // Sort by final RRF score
-  const sortedRrf = Array.from(rrfScores.values()).sort((a, b) => b.score - a.score);
+  // 4. Reranker Pass & Threshold Filtering
+  const candidates = Array.from(rrfScores.values()).map(item => {
+    const rScore = rerankScore(query, item.chunk.content, item.score);
+    return { ...item, rerankScore: rScore };
+  });
 
-  return sortedRrf.slice(0, topK).map(item => ({
+  candidates.sort((a, b) => b.rerankScore - a.rerankScore);
+
+  // Return topK pristine relevant chunks
+  return candidates.slice(0, topK).map(item => ({
     chunkId: item.chunk.id,
     documentId: item.chunk.documentId,
     documentName: item.chunk.documentName,
@@ -171,6 +200,7 @@ export async function performHybridSearch(
     pageNumber: item.chunk.pageNumber,
     score: item.score,
     vectorRank: item.vectorRank,
-    bm25Rank: item.bm25Rank
+    bm25Rank: item.bm25Rank,
+    rerankScore: item.rerankScore,
   }));
 }

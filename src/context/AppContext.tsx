@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { processDocumentIngestion } from '../lib/ingestion/pipeline';
 import { performHybridSearch, RetrievalResult, globalVectorIndex } from '../lib/rag/hybrid-retrieval';
+import { generateGroundedResponse } from '../lib/rag/llm-provider';
 import { dbApi } from '../lib/api';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -397,14 +398,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setIsSending(true);
     try {
-      const sources = await performHybridSearch(activeWorkspace.id, text, 3, 60);
-      let answerText = '';
-      if (sources.length === 0) {
-        answerText = "I searched your workspace documents but couldn't find relevant information matching your query. Try uploading more documents or rephrasing your question.";
-      } else {
-        const top = sources[0];
-        answerText = `Based on the documents in ${activeWorkspace.name}, ${top.content.slice(0, 500)}`;
-      }
+      const sources = await performHybridSearch(activeWorkspace.id, text, 4, 60);
+      const contextItems = sources.map(s => ({
+        id: s.chunkId,
+        documentName: s.documentName,
+        pageNumber: s.pageNumber,
+        content: s.content,
+        score: s.rerankScore || s.score,
+      }));
+
+      const llmResult = await generateGroundedResponse(text, contextItems);
+      const answerText = llmResult.answer;
+
       const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', answerText, sources);
       const assistantMsg: ChatMessage = {
         id: assistantMsgId || `msg-${Date.now() + 1}`,
@@ -414,11 +419,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages(prev => [...prev, assistantMsg]);
-    } catch {
-      const errId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', 'An error occurred during retrieval.');
+    } catch (err: any) {
+      console.error('[RAG Chat Error]:', err);
+      const errText = 'An error occurred while querying the RAG engine. Please try again.';
+      const errId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', errText);
       setMessages(prev => [
         ...prev,
-        { id: errId || `msg-err-${Date.now()}`, role: 'assistant', content: 'An error occurred during retrieval.', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+        { id: errId || `msg-err-${Date.now()}`, role: 'assistant', content: errText, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
       ]);
     } finally {
       setIsSending(false);

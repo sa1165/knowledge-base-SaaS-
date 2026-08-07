@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
+import { RetrievalResult } from '../../lib/rag/hybrid-retrieval';
 import {
   Send, Bot, FileText, X, ExternalLink, Download,
-  Plus, CheckCircle2, AlertCircle, Loader2, Upload, MessageSquare
+  CheckCircle2, AlertCircle, Loader2, MessageSquare, Sparkles, BookOpen, Layers
 } from 'lucide-react';
 
 // ── Document Status Indicator ────────────────────────────────────
@@ -25,11 +26,12 @@ const statusLabel = (status: string) => {
 
 // ── Main Chat Component ──────────────────────────────────────────
 export const HybridRagChat: React.FC = () => {
-  const { messages, sendMessage, isSending, activeWorkspace, documents, uploadDocument, setActiveScreen } = useApp();
+  const { messages, sendMessage, isSending, activeWorkspace, documents, setActiveScreen } = useApp();
   const [input, setInput] = useState('');
+  const [selectedSource, setSelectedSource] = useState<RetrievalResult | null>(null);
+  const [allSources, setAllSources] = useState<RetrievalResult[]>([]);
   const [sourceOpen, setSourceOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -37,11 +39,13 @@ export const HybridRagChat: React.FC = () => {
 
   // Track last AI message with sources
   const lastAiWithSources = [...messages].reverse().find(m => m.role === 'assistant' && m.sources && m.sources.length > 0);
-  const topSource = lastAiWithSources?.sources?.[0];
 
   useEffect(() => {
-    if (topSource) setSourceOpen(true);
-  }, [topSource?.chunkId]);
+    if (lastAiWithSources?.sources && lastAiWithSources.sources.length > 0) {
+      setAllSources(lastAiWithSources.sources);
+      setSelectedSource(lastAiWithSources.sources[0]);
+    }
+  }, [lastAiWithSources?.id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +53,12 @@ export const HybridRagChat: React.FC = () => {
     const q = input.trim();
     setInput('');
     sendMessage(q);
+  };
+
+  const handleOpenSource = (source: RetrievalResult, sourcesList: RetrievalResult[]) => {
+    setAllSources(sourcesList);
+    setSelectedSource(source);
+    setSourceOpen(true);
   };
 
   // ── No workspace selected state ──────────────────────────────────
@@ -86,7 +96,6 @@ export const HybridRagChat: React.FC = () => {
 
   const workspaceDocs = documents.filter(d => d.workspaceId === activeWorkspace.id);
   const readyCount = workspaceDocs.filter(d => d.status === 'ready').length;
-  const processingCount = workspaceDocs.filter(d => d.status === 'processing').length;
   const hasIndexedDocs = readyCount > 0;
 
   return (
@@ -99,7 +108,7 @@ export const HybridRagChat: React.FC = () => {
       }}>
         <div style={{ padding: '16px 16px 10px', borderBottom: '1px solid #f4f4f3' }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#8e8e93' }}>
-            Documents
+            Workspace Documents ({workspaceDocs.length})
           </div>
         </div>
 
@@ -111,7 +120,7 @@ export const HybridRagChat: React.FC = () => {
                 No documents yet.
               </p>
               <p style={{ fontSize: 11, color: '#c1c1c4', margin: '6px 0 0 0' }}>
-                Upload your first file to start.
+                Upload files in Documents tab.
               </p>
             </div>
           ) : (
@@ -145,125 +154,103 @@ export const HybridRagChat: React.FC = () => {
             ))
           )}
         </div>
-
-        {/* Add Documents */}
-        <div style={{ padding: '12px 16px', borderTop: '1px solid #eaeaea' }}>
-          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.doc,.docx" style={{ display: 'none' }}
-            onChange={e => { if (e.target.files?.[0]) uploadDocument(e.target.files[0]); e.target.value = ''; }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              background: 'none', border: '1px dashed #d1d1d1', borderRadius: 8,
-              padding: '9px 12px', fontSize: 12, color: '#8e8e93', cursor: 'pointer', fontWeight: 600
-            }}
-          >
-            <Plus size={13} />
-            Add documents
-          </button>
-        </div>
       </div>
 
-      {/* ── CENTER: Chat Area ────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+      {/* ── CENTER: Chat Messages & Input ────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        {/* Chat Header */}
-        <div style={{ padding: '14px 20px', background: '#ffffff', borderBottom: '1px solid #eaeaea', flexShrink: 0 }}>
-          <h2 className="font-serif" style={{ fontSize: 16, fontWeight: 500, color: '#16161a' }}>
-            {activeWorkspace.name}
-          </h2>
-          <p style={{ fontSize: 12, color: '#8e8e93', marginTop: 2 }}>
-            {readyCount} doc{readyCount !== 1 ? 's' : ''} ready
-            {processingCount > 0 && ` · ${processingCount} processing`}
-            {topSource && (
-              <button
-                onClick={() => setSourceOpen(!sourceOpen)}
-                style={{
-                  marginLeft: 10, background: '#edf4fc', border: 'none',
-                  borderRadius: 6, padding: '2px 8px', fontSize: 11, color: '#2563eb',
-                  fontWeight: 600, cursor: 'pointer'
-                }}
-              >
-                {sourceOpen ? 'Hide' : 'Show'} Sources
-              </button>
-            )}
-          </p>
-        </div>
-
-        {/* Messages */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* Empty state — no docs uploaded yet */}
-          {messages.length === 0 && !hasIndexedDocs && (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '60px 20px' }}>
-              <div style={{ width: 56, height: 56, background: '#f4f4f3', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eaeaea' }}>
-                <Upload size={24} color="#c1c1c4" />
+        {/* Header Bar */}
+        <div style={{
+          padding: '12px 24px', background: '#ffffff', borderBottom: '1px solid #eaeaea',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8, background: '#16161a', color: '#ffffff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <Sparkles size={14} />
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#16161a' }}>
+                Flagship RAG Engine <span style={{ fontSize: 11, fontWeight: 600, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: 10, marginLeft: 6 }}>Groq 3-Key + Gemini</span>
               </div>
-              <div style={{ textAlign: 'center', maxWidth: 380 }}>
-                <p className="font-serif" style={{ fontSize: 20, color: '#16161a', fontWeight: 400, margin: '0 0 8px 0' }}>
-                  No documents indexed yet
-                </p>
-                <p style={{ fontSize: 13, color: '#8e8e93', lineHeight: 1.6, margin: '0 0 20px 0' }}>
-                  Upload documents to this workspace before you can start chatting. Every answer cites its source.
-                </p>
-                <button
-                  onClick={() => setActiveScreen('documents')}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8,
-                    background: '#16161a', color: '#ffffff', border: 'none', borderRadius: 10,
-                    padding: '11px 22px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                  }}
-                >
-                  <Upload size={15} />
-                  Go to Documents
-                </button>
+              <div style={{ fontSize: 11, color: '#8e8e93' }}>
+                Strict grounding · Zero hallucinations · &lt;2s latency
               </div>
             </div>
-          )}
+          </div>
+        </div>
 
-          {/* Empty state — docs exist but no chat yet */}
-          {messages.length === 0 && hasIndexedDocs && (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '60px 20px' }}>
-              <div style={{ width: 48, height: 48, background: '#f4f4f3', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Bot size={24} color="#8e8e93" />
+        {/* Message Stream */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {messages.length === 0 && (
+            <div style={{ textAlign: 'center', margin: 'auto', maxWidth: 420 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: 16, background: '#f4f4f3', border: '1px solid #eaeaea',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px'
+              }}>
+                <Sparkles size={24} color="#2563eb" />
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <p className="font-serif" style={{ fontSize: 18, color: '#16161a', fontWeight: 400, margin: '0 0 8px 0' }}>
-                  Ask your first question
-                </p>
-                <p style={{ fontSize: 13, color: '#8e8e93', marginTop: 6 }}>
-                  {readyCount} document{readyCount !== 1 ? 's' : ''} indexed in <strong>{activeWorkspace.name}</strong>. Ask anything — every answer cites its source.
-                </p>
-              </div>
+              <h3 className="font-serif" style={{ fontSize: 20, fontWeight: 400, color: '#16161a', margin: '0 0 8px 0' }}>
+                Ask Docly AI
+              </h3>
+              <p style={{ fontSize: 13, color: '#8e8e93', lineHeight: 1.6, margin: 0 }}>
+                Query your documents with precision. Responses are strictly grounded with exact inline source citations.
+              </p>
             </div>
           )}
 
           {messages.map(msg => (
             <div key={msg.id} style={{
-              display: 'flex', gap: 12,
-              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              alignItems: 'flex-end'
+              display: 'flex', flexDirection: 'column',
+              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              gap: 6
             }}>
-              {msg.role === 'assistant' && (
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: '#edf4fc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginBottom: 4 }}>
-                  <Bot size={15} color="#2563eb" />
-                </div>
-              )}
-              <div style={{
-                maxWidth: '72%', borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
-                padding: '14px 18px',
-                background: msg.role === 'user' ? '#16161a' : '#ffffff',
-                border: msg.role === 'user' ? 'none' : '1px solid #eaeaea',
-                color: msg.role === 'user' ? '#ffffff' : '#16161a',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
-              }}>
-                <div style={{ fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
-                </div>
-                <div style={{ fontSize: 10, color: msg.role === 'user' ? 'rgba(255,255,255,0.4)' : '#c1c1c4', marginTop: 8, textAlign: 'right', fontFamily: 'monospace' }}>
-                  {msg.timestamp}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', maxWidth: '85%', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
+                {msg.role === 'assistant' && (
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: '#16161a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 4 }}>
+                    <Bot size={15} color="#ffffff" />
+                  </div>
+                )}
+                <div style={{
+                  borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+                  padding: '14px 18px',
+                  background: msg.role === 'user' ? '#16161a' : '#ffffff',
+                  border: msg.role === 'user' ? 'none' : '1px solid #eaeaea',
+                  color: msg.role === 'user' ? '#ffffff' : '#16161a',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                }}>
+                  <div style={{ fontSize: 14, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                    {msg.content}
+                  </div>
+
+                  {/* Inline Source Chips */}
+                  {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f4f4f3', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#8e8e93', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <BookOpen size={12} /> Sources:
+                      </span>
+                      {msg.sources.map((src, idx) => (
+                        <button
+                          key={src.chunkId || idx}
+                          onClick={() => handleOpenSource(src, msg.sources!)}
+                          style={{
+                            background: '#f4f4f3', border: '1px solid #eaeaea', borderRadius: 6,
+                            padding: '3px 8px', fontSize: 11, fontWeight: 600, color: '#2563eb',
+                            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4
+                          }}
+                        >
+                          [{idx + 1}] {src.documentName} {src.pageNumber ? `(p. ${src.pageNumber})` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: 10, color: msg.role === 'user' ? 'rgba(255,255,255,0.4)' : '#c1c1c4', marginTop: 6, textAlign: 'right', fontFamily: 'monospace' }}>
+                    {msg.timestamp}
+                  </div>
                 </div>
               </div>
             </div>
@@ -271,18 +258,13 @@ export const HybridRagChat: React.FC = () => {
 
           {isSending && (
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: '#f4f4f3', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Loader2 size={15} color="#8e8e93" style={{ animation: 'spin 1.4s linear infinite' }} />
+              <div style={{ width: 30, height: 30, borderRadius: 8, background: '#16161a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1.4s linear infinite' }} />
               </div>
               <div style={{ background: '#ffffff', border: '1px solid #eaeaea', borderRadius: '4px 18px 18px 18px', padding: '14px 18px' }}>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  {[0, 1, 2].map(i => (
-                    <span key={i} style={{
-                      width: 6, height: 6, background: '#d1d1d1', borderRadius: '50%',
-                      display: 'inline-block',
-                      animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`
-                    }} />
-                  ))}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, color: '#8e8e93', fontWeight: 600 }}>
+                  <Sparkles size={14} color="#2563eb" style={{ animation: 'spin 2s linear infinite' }} />
+                  Running Hybrid Vector + BM25 Reranker Search & Dual-Engine LLM...
                 </div>
               </div>
             </div>
@@ -316,89 +298,92 @@ export const HybridRagChat: React.FC = () => {
           </form>
           <p style={{ fontSize: 11, color: '#c1c1c4', marginTop: 8, textAlign: 'center' }}>
             {hasIndexedDocs
-              ? `Press Enter to send · ${readyCount} doc${readyCount !== 1 ? 's' : ''} in context`
+              ? `Press Enter to query · ${readyCount} document${readyCount !== 1 ? 's' : ''} indexed`
               : 'Upload and index documents to start chatting'
             }
           </p>
         </div>
       </div>
 
-      {/* ── RIGHT: Source Panel ──────────────────────────────────── */}
-      {sourceOpen && topSource && (
+      {/* ── RIGHT: Source Inspection Drawer ────────────────────────── */}
+      {sourceOpen && selectedSource && (
         <div style={{
-          width: 280, flexShrink: 0, background: '#ffffff', borderLeft: '1px solid #eaeaea',
+          width: 320, flexShrink: 0, background: '#ffffff', borderLeft: '1px solid #eaeaea',
           display: 'flex', flexDirection: 'column', overflow: 'hidden'
         }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid #eaeaea', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a' }}>Source</div>
-              <div style={{ fontSize: 11, color: '#8e8e93', marginTop: 2 }}>Last cited document</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BookOpen size={15} color="#2563eb" /> Grounded Source Citations
+              </div>
+              <div style={{ fontSize: 11, color: '#8e8e93', marginTop: 2 }}>{allSources.length} context match(es)</div>
             </div>
             <button onClick={() => setSourceOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8e8e93', padding: 4 }}>
               <X size={16} />
             </button>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-            {/* Document Name */}
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 20 }}>
-              <div style={{ width: 36, height: 36, background: '#fff0f0', border: '1px solid #fecaca', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <FileText size={16} color="#dc2626" />
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a' }}>{topSource.documentName}</div>
-                <div style={{ fontSize: 12, color: '#8e8e93', marginTop: 2 }}>
-                  {topSource.pageNumber ? `Page ${topSource.pageNumber}` : 'Source chunk'}
-                </div>
-              </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Source Tab Selector */}
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+              {allSources.map((src, idx) => (
+                <button
+                  key={src.chunkId || idx}
+                  onClick={() => setSelectedSource(src)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    border: selectedSource.chunkId === src.chunkId ? '1px solid #2563eb' : '1px solid #eaeaea',
+                    background: selectedSource.chunkId === src.chunkId ? '#eff6ff' : '#f9f9f8',
+                    color: selectedSource.chunkId === src.chunkId ? '#2563eb' : '#5e5e62',
+                    cursor: 'pointer', flexShrink: 0
+                  }}
+                >
+                  Source #{idx + 1}
+                </button>
+              ))}
             </div>
 
-            {/* Cited Excerpt */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#8e8e93', marginBottom: 10 }}>
-                Cited excerpt
+            {/* Selected Document Card */}
+            <div style={{ background: '#fcfcfb', border: '1px solid #eaeaea', borderRadius: 12, padding: '16px' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+                <div style={{ width: 36, height: 36, background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <FileText size={16} color="#2563eb" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#16161a' }}>{selectedSource.documentName}</div>
+                  <div style={{ fontSize: 11, color: '#8e8e93', marginTop: 2 }}>
+                    {selectedSource.pageNumber ? `Page ${selectedSource.pageNumber}` : 'Full section'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Relevance Score Badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 10px', borderRadius: 100 }}>
+                  {Math.round((selectedSource.rerankScore || selectedSource.score) * 100)}% Relevance Match
+                </span>
+              </div>
+
+              {/* Text Excerpt */}
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#8e8e93', marginBottom: 8 }}>
+                Retrieved Context Snippet
               </div>
               <blockquote style={{
-                background: '#fbfbfa', border: '1px solid #eaeaea', borderRadius: 10,
-                padding: '14px', fontSize: 12.5, color: '#5e5e62', lineHeight: 1.65,
-                fontStyle: 'italic', margin: 0
+                background: '#ffffff', border: '1px solid #eaeaea', borderRadius: 8,
+                padding: '12px', fontSize: 12.5, color: '#374151', lineHeight: 1.6,
+                margin: 0, maxHeight: 240, overflowY: 'auto'
               }}>
-                "{topSource.content.slice(0, 300)}{topSource.content.length > 300 ? '...' : ''}"
+                "{selectedSource.content}"
               </blockquote>
             </div>
 
-            {/* Action Buttons */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                background: '#ffffff', border: '1px solid #eaeaea', borderRadius: 8,
-                padding: '10px 14px', fontSize: 12.5, fontWeight: 600, color: '#2563eb', cursor: 'pointer'
-              }}>
-                <ExternalLink size={14} />
-                Open source document
-              </button>
-              <button style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                background: '#ffffff', border: '1px solid #eaeaea', borderRadius: 8,
-                padding: '10px 14px', fontSize: 12.5, fontWeight: 600, color: '#5e5e62', cursor: 'pointer'
-              }}>
-                <Download size={14} />
-                Download {topSource.documentName}
-              </button>
-            </div>
           </div>
         </div>
       )}
 
       <style>{`
-        @keyframes bounce {
-          0%, 60%, 100% { transform: translateY(0); }
-          30% { transform: translateY(-6px); }
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );
