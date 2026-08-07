@@ -28,25 +28,22 @@ const MAX_CONTENT_CHARS_PER_CHUNK = 800;
 // ── Request timeout (ms): if API doesn't respond in 15s, abort and try next key ──
 const REQUEST_TIMEOUT_MS = 15000;
 
-// Extract environment variables safely across Vite and Node
-function getEnv(key: string): string {
-  const metaEnv = (import.meta as any)?.env;
-  if (metaEnv && metaEnv[key]) return metaEnv[key];
-  if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key];
-  return '';
-}
-
-// ── API Key Registry (Loaded dynamically from environment) ───────────────────
+// ── API Key Registry (Loaded statically from environment) ───────────────────
 function getGroqKeys(): string[] {
-  return [
-    getEnv('VITE_GROQ_API_KEY_1'),
-    getEnv('VITE_GROQ_API_KEY_2'),
-    getEnv('VITE_GROQ_API_KEY_3'),
-  ].filter(k => Boolean(k) && typeof k === 'string' && k.trim().length > 0);
+  const meta = (import.meta as any)?.env || {};
+  const proc = typeof process !== 'undefined' ? process.env || {} : {};
+
+  const k1 = meta.VITE_GROQ_API_KEY_1 || proc.VITE_GROQ_API_KEY_1 || '';
+  const k2 = meta.VITE_GROQ_API_KEY_2 || proc.VITE_GROQ_API_KEY_2 || '';
+  const k3 = meta.VITE_GROQ_API_KEY_3 || proc.VITE_GROQ_API_KEY_3 || '';
+
+  return [k1, k2, k3].filter(k => Boolean(k) && typeof k === 'string' && k.trim().length > 0);
 }
 
 function getGeminiKey(): string {
-  return getEnv('VITE_GEMINI_API_KEY') || '';
+  const meta = (import.meta as any)?.env || {};
+  const proc = typeof process !== 'undefined' ? process.env || {} : {};
+  return meta.VITE_GEMINI_API_KEY || proc.VITE_GEMINI_API_KEY || '';
 }
 
 // Round-robin index (advances after each successful request)
