@@ -1,9 +1,10 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import mammoth from 'mammoth';
 
-// Configure pdfjs worker using inline/CDN URL safely
+// Configure local Vite-bundled worker for PDF.js (no cross-origin CORS blocks)
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 }
 
 export interface ParsedDocument {
@@ -13,16 +14,16 @@ export interface ParsedDocument {
 }
 
 /**
- * Native Browser-Safe PDF Text Extractor using pdfjs-dist
+ * Native Browser-Safe PDF Text Extractor using PDF.js + local bundled worker
  */
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
-  // 1. Try pdfjs-dist full page layout parsing
   try {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,
       disableFontFace: true,
     });
+
     const pdfDoc = await loadingTask.promise;
     const pageCount = pdfDoc.numPages;
     const textParts: string[] = [];
@@ -34,41 +35,39 @@ async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string;
         .map((item: any) => item.str || '')
         .join(' ');
 
-      if (pageText.trim()) {
+      if (pageText.trim().length > 0) {
         textParts.push(`--- Page ${pageNum} ---\n${pageText}`);
       }
     }
 
     const fullText = textParts.join('\n\n').trim();
-    if (fullText.length > 20) {
+    if (fullText.length > 0) {
+      console.log(`[Parser] Successfully extracted ${fullText.length} characters across ${pageCount} pages using PDF.js worker`);
       return { text: fullText, pageCount };
     }
   } catch (err: any) {
-    console.warn('[Parser] pdfjs-dist extraction notice:', err?.message);
+    console.error('[Parser] pdfjs-dist worker extraction error:', err);
   }
 
-  // 2. High-precision fallback: Stream text extractor (extracts readable text tokens from PDF streams)
+  // Fallback: Stream text extractor for non-standard / legacy text streams
   const streamText = extractTextFromPdfStreams(new Uint8Array(arrayBuffer));
   return {
-    text: streamText || 'VR-AR technology enables immersive industrial renewal, interactive maintenance, and digital twin monitoring for manufacturing environments.',
+    text: streamText || 'No extractable text found in PDF.',
     pageCount: 1,
   };
 }
 
 /**
  * Stream Text Extractor (Extracts human-readable text blocks from PDF stream objects)
- * Filters out raw binary PDF structures (%PDF-1.4, obj, catalog, etc.)
  */
 function extractTextFromPdfStreams(uint8: Uint8Array): string {
   const decoder = new TextDecoder('latin1');
   const str = decoder.decode(uint8);
   const textBlocks: string[] = [];
 
-  // Match text contained inside PDF text operators (text)
   const matches = str.match(/\(([^()]{2,})\)/g) || [];
   for (const m of matches) {
     const raw = m.slice(1, -1).replace(/\\([()\\])/g, '$1').trim();
-    // Exclude PDF keywords, structural tags, and binary data
     if (
       raw.length > 2 &&
       !/^(PDF|Catalog|Pages|Page|Font|Encoding|Type|Parent|Kids|Root|Info|CreationDate|ModDate|Producer|Title|Author|Subject|Keywords|ProcSet|MediaBox|CropBox|Resources)$/i.test(raw) &&
@@ -79,8 +78,7 @@ function extractTextFromPdfStreams(uint8: Uint8Array): string {
     }
   }
 
-  const result = textBlocks.join(' ').replace(/\s+/g, ' ').trim();
-  return result;
+  return textBlocks.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 export async function parseDocumentBuffer(
@@ -102,13 +100,13 @@ export async function parseDocumentBuffer(
   const arrayBuffer = rawBuffer as ArrayBuffer;
 
   // 1. PDF Documents
-  if (mimeType.includes('pdf') || extension === 'pdf') {
+  if (mimeType.includes('pdf') || extension === 'pdf' || filename.toLowerCase().endsWith('.pdf')) {
     const { text, pageCount } = await extractPdfText(arrayBuffer);
     return { text, pageCount };
   }
 
   // 2. DOCX Documents
-  if (mimeType.includes('wordprocessingml') || extension === 'docx') {
+  if (mimeType.includes('wordprocessingml') || extension === 'docx' || filename.toLowerCase().endsWith('.docx')) {
     try {
       const result = await mammoth.extractRawText({ arrayBuffer });
       if (result.value && result.value.trim().length > 0) {
