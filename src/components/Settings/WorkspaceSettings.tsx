@@ -227,13 +227,25 @@ export const WorkspaceSettings: React.FC = () => {
     }
   };
 
+  const [confirmRemoveMember, setConfirmRemoveMember] = useState<{ id: string; name: string } | null>(null);
+  const [isRemovingMember, setIsRemovingMember] = useState(false);
+
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteEmail.trim()) return;
+    const cleanEmail = inviteEmail.trim().toLowerCase();
+    if (!cleanEmail) return;
+
+    // Check duplicate invite
+    const existing = members.find(m => m.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      showToast(`${existing.name || cleanEmail} is already a member of this workspace.`, 'error');
+      return;
+    }
+
     setIsInviting(true);
     try {
-      const name = inviteName.trim() || inviteEmail.split('@')[0];
-      await addMember(name, inviteEmail.trim(), inviteRole);
+      const name = inviteName.trim() || cleanEmail.split('@')[0];
+      await addMember(name, cleanEmail, inviteRole);
       setInviteEmail('');
       setInviteName('');
       showToast(`Invited ${name} as ${inviteRole}`, 'success');
@@ -241,6 +253,20 @@ export const WorkspaceSettings: React.FC = () => {
       showToast('Failed to send invite.', 'error');
     } finally {
       setIsInviting(false);
+    }
+  };
+
+  const handleConfirmRemoveMember = async () => {
+    if (!confirmRemoveMember) return;
+    setIsRemovingMember(true);
+    try {
+      await removeMember(confirmRemoveMember.id);
+      showToast(`Removed ${confirmRemoveMember.name} from workspace.`, 'success');
+      setConfirmRemoveMember(null);
+    } catch {
+      showToast('Failed to remove member.', 'error');
+    } finally {
+      setIsRemovingMember(false);
     }
   };
 
@@ -272,6 +298,17 @@ export const WorkspaceSettings: React.FC = () => {
           onConfirm={handleDeleteWorkspace}
           onCancel={() => setConfirmDeleteWorkspace(false)}
           isLoading={isDeletingWorkspace}
+        />
+      )}
+
+      {confirmRemoveMember && (
+        <ConfirmDialog
+          title="Remove team member?"
+          message={`Are you sure you want to remove "${confirmRemoveMember.name}" from "${activeWorkspace.name}"? They will lose access to all documents and chat sessions in this workspace.`}
+          confirmLabel="Remove member"
+          onConfirm={handleConfirmRemoveMember}
+          onCancel={() => setConfirmRemoveMember(null)}
+          isLoading={isRemovingMember}
         />
       )}
 
@@ -523,7 +560,7 @@ export const WorkspaceSettings: React.FC = () => {
                         {/* Remove Member */}
                         {isOwner && !member.isYou && (
                           <button
-                            onClick={() => removeMember(member.id)}
+                            onClick={() => setConfirmRemoveMember({ id: member.id, name: member.name })}
                             style={{
                               background: 'none', border: 'none', cursor: 'pointer',
                               color: '#c1c1c4', padding: 4, borderRadius: 4, transition: 'color 0.15s'
