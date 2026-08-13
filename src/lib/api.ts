@@ -316,125 +316,201 @@ export const dbApi = {
   // ══════════════════════════════════════════════════════════════════
 
   async createWorkspaceInvite(workspaceId: string, workspaceName: string, inviteeEmail: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
-    if (!isSupabaseConfigured || !supabase) return `inv-${Date.now()}`;
-
     const currentUserId = await getAuthUserId();
     const cleanEmail = inviteeEmail.trim().toLowerCase();
+    const inviteId = `inv-${Date.now()}`;
 
-    try {
-      // Fetch inviter user info
-      let inviterName = 'Teammate';
-      let inviterEmail = '';
+    // Fetch inviter user info
+    let inviterName = 'Teammate';
+    let inviterEmail = '';
 
-      if (currentUserId) {
+    if (currentUserId && supabase) {
+      try {
         const { data: u } = await supabase.from('users').select('name, email').eq('id', currentUserId).single();
         if (u) {
           inviterName = u.name || inviterName;
           inviterEmail = u.email || '';
         }
-      }
-
-      const { data, error } = await supabase
-        .from('workspace_invitations')
-        .insert({
-          workspace_id: workspaceId,
-          workspace_name: workspaceName,
-          inviter_user_id: currentUserId || 'system',
-          inviter_name: inviterName,
-          inviter_email: inviterEmail,
-          invitee_email: cleanEmail,
-          role,
-          status: 'pending',
-        })
-        .select('id')
-        .single();
-
-      if (error) { console.error('[api] createWorkspaceInvite:', error.message); return null; }
-
-      // Optional Auth Mailer dispatch
-      try {
-        await supabase.auth.signInWithOtp({
-          email: cleanEmail,
-          options: { emailRedirectTo: `${window.location.origin}/app?invite=${workspaceId}` },
-        });
-      } catch (e) { /* silent fallback */ }
-
-      return data.id;
-    } catch (err) {
-      console.warn('[api] createWorkspaceInvite fallback:', err);
-      return `inv-${Date.now()}`;
+      } catch (e) { /* ignore */ }
     }
+
+    const inviteObj = {
+      id: inviteId,
+      workspaceId,
+      workspaceName,
+      inviterUserId: currentUserId || 'system',
+      inviterName,
+      inviterEmail,
+      inviteeEmail: cleanEmail,
+      role,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    // 1. Sync to localStorage for instant cross-tab / local testing fallback
+    try {
+      const existingStr = localStorage.getItem('docly_workspace_invitations');
+      const localList = existingStr ? JSON.parse(existingStr) : [];
+      localList.unshift(inviteObj);
+      localStorage.setItem('docly_workspace_invitations', JSON.stringify(localList));
+    } catch (e) { console.warn('[api] localStorage invite save warning:', e); }
+
+    // 2. Insert into Supabase workspace_invitations table
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data } = await supabase
+          .from('workspace_invitations')
+          .insert({
+            workspace_id: workspaceId,
+            workspace_name: workspaceName,
+            inviter_user_id: currentUserId || 'system',
+            inviter_name: inviterName,
+            inviter_email: inviterEmail,
+            invitee_email: cleanEmail,
+            role,
+            status: 'pending',
+          })
+          .select('id')
+          .single();
+
+        if (data?.id) inviteObj.id = data.id;
+
+        // Optional Auth Mailer dispatch
+        try {
+          await supabase.auth.signInWithOtp({
+            email: cleanEmail,
+            options: { emailRedirectTo: `${window.location.origin}/app?invite=${workspaceId}` },
+          });
+        } catch (e) { /* silent fallback */ }
+      } catch (err) {
+        console.warn('[api] Supabase createWorkspaceInvite warning:', err);
+      }
+    }
+
+    return inviteObj.id;
   },
 
   async getPendingInvitesForUser(userEmail: string): Promise<any[]> {
-    if (!isSupabaseConfigured || !supabase || !userEmail) return [];
+    if (!userEmail) return [];
+    const cleanUserEmail = userEmail.trim().toLowerCase();
+    const invitesMap = new Map<string, any>();
+
+    // 1. Read from localStorage fallback
     try {
-      const { data, error } = await supabase
-        .from('workspace_invitations')
-        .select('*')
-        .eq('invitee_email', userEmail.trim().toLowerCase())
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
+      const existingStr = localStorage.getItem('docly_workspace_invitations');
+      if (existingStr) {
+        const localList = JSON.parse(existingStr);
+        (localList || []).forEach((inv: any) => {
+          if (inv.inviteeEmail?.toLowerCase() === cleanUserEmail && inv.status === 'pending') {
+            invitesMap.set(inv.id || `${inv.workspaceId}-${inv.inviteeEmail}`, {
+              id: inv.id || `${inv.workspaceId}-${inv.inviteeEmail}`,
+              workspaceId: inv.workspaceId,
+              workspaceName: inv.workspaceName,
+              inviterName: inv.inviterName || 'Teammate',
+              inviterEmail: inv.inviterEmail || '',
+              inviteeEmail: inv.inviteeEmail,
+              role: inv.role,
+              status: inv.status,
+              createdAt: new Date(inv.createdAt || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            });
+          }
+        });
+      }
+    } catch (e) { console.warn('[api] localStorage getPendingInvites error:', e); }
 
-      if (error) { console.warn('[api] getPendingInvitesForUser:', error.message); return []; }
+    // 2. Read from Supabase workspace_invitations table
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('workspace_invitations')
+          .select('*')
+          .eq('invitee_email', cleanUserEmail)
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false });
 
-      return (data || []).map((row: any) => ({
-        id: row.id,
-        workspaceId: row.workspace_id,
-        workspaceName: row.workspace_name,
-        inviterName: row.inviter_name || 'Teammate',
-        inviterEmail: row.inviter_email || '',
-        inviteeEmail: row.invitee_email,
-        role: row.role as 'owner' | 'editor' | 'viewer',
-        status: row.status,
-        createdAt: new Date(row.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      }));
-    } catch (err) {
-      console.warn('[api] getPendingInvitesForUser failed:', err);
-      return [];
+        if (!error && data) {
+          data.forEach((row: any) => {
+            invitesMap.set(row.id, {
+              id: row.id,
+              workspaceId: row.workspace_id,
+              workspaceName: row.workspace_name,
+              inviterName: row.inviter_name || 'Teammate',
+              inviterEmail: row.inviter_email || '',
+              inviteeEmail: row.invitee_email,
+              role: row.role as 'owner' | 'editor' | 'viewer',
+              status: row.status,
+              createdAt: new Date(row.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            });
+          });
+        }
+      } catch (err) {
+        console.warn('[api] Supabase getPendingInvitesForUser error:', err);
+      }
     }
+
+    return Array.from(invitesMap.values());
   },
 
   async acceptWorkspaceInvite(inviteId: string, workspaceId: string, role: 'owner' | 'editor' | 'viewer'): Promise<boolean> {
-    if (!isSupabaseConfigured || !supabase) return true;
     const userId = await getAuthUserId();
-    if (!userId) return false;
 
+    // 1. Update status in localStorage
     try {
-      // 1. Mark invitation status as accepted
-      await supabase
-        .from('workspace_invitations')
-        .update({ status: 'accepted' })
-        .eq('id', inviteId);
-
-      // 2. Add user to workspace_members
-      const { error: memErr } = await supabase
-        .from('workspace_members')
-        .insert({ workspace_id: workspaceId, user_id: userId, role });
-
-      if (memErr && !memErr.message.includes('duplicate')) {
-        console.error('[api] acceptWorkspaceInvite member add:', memErr.message);
+      const existingStr = localStorage.getItem('docly_workspace_invitations');
+      if (existingStr) {
+        const localList = JSON.parse(existingStr);
+        const updated = localList.map((inv: any) => (inv.id === inviteId || inv.workspaceId === workspaceId) ? { ...inv, status: 'accepted' } : inv);
+        localStorage.setItem('docly_workspace_invitations', JSON.stringify(updated));
       }
+    } catch (e) { /* ignore */ }
 
-      return true;
-    } catch (err) {
-      console.warn('[api] acceptWorkspaceInvite failed:', err);
-      return false;
+    // 2. Update status & add to workspace_members in Supabase
+    if (isSupabaseConfigured && supabase && userId) {
+      try {
+        await supabase
+          .from('workspace_invitations')
+          .update({ status: 'accepted' })
+          .eq('id', inviteId);
+
+        const { error: memErr } = await supabase
+          .from('workspace_members')
+          .insert({ workspace_id: workspaceId, user_id: userId, role });
+
+        if (memErr && !memErr.message.includes('duplicate')) {
+          console.error('[api] acceptWorkspaceInvite member add:', memErr.message);
+        }
+      } catch (err) {
+        console.warn('[api] acceptWorkspaceInvite DB error:', err);
+      }
     }
+
+    return true;
   },
 
   async declineWorkspaceInvite(inviteId: string): Promise<boolean> {
-    if (!isSupabaseConfigured || !supabase) return true;
+    // 1. Update status in localStorage
     try {
-      await supabase
-        .from('workspace_invitations')
-        .update({ status: 'declined' })
-        .eq('id', inviteId);
-      return true;
-    } catch (err) {
-      console.warn('[api] declineWorkspaceInvite failed:', err);
-      return false;
+      const existingStr = localStorage.getItem('docly_workspace_invitations');
+      if (existingStr) {
+        const localList = JSON.parse(existingStr);
+        const updated = localList.map((inv: any) => inv.id === inviteId ? { ...inv, status: 'declined' } : inv);
+        localStorage.setItem('docly_workspace_invitations', JSON.stringify(updated));
+      }
+    } catch (e) { /* ignore */ }
+
+    // 2. Update status in Supabase
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase
+          .from('workspace_invitations')
+          .update({ status: 'declined' })
+          .eq('id', inviteId);
+      } catch (err) {
+        console.warn('[api] declineWorkspaceInvite DB error:', err);
+      }
     }
+
+    return true;
   },
 
   async addMember(workspaceId: string, email: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
