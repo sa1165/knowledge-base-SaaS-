@@ -28,27 +28,53 @@ export const dbApi = {
     const userId = await getAuthUserId();
     if (!userId) return [];
 
-    const { data, error } = await supabase
-      .from('workspaces')
-      .select('*')
-      .eq('owner_id', userId)
-      .order('created_at', { ascending: false });
+    try {
+      // 1. Fetch workspaces owned by user
+      const { data: ownedWs, error: ownedErr } = await supabase
+        .from('workspaces')
+        .select('*')
+        .eq('owner_id', userId)
+        .order('created_at', { ascending: false });
 
-    if (error) { console.warn('[api] getWorkspaces:', error.message); return []; }
+      if (ownedErr) console.warn('[api] getWorkspaces owned error:', ownedErr.message);
 
-    return (data || []).map(row => ({
-      id: row.id,
-      name: row.name,
-      description: row.description || '',
-      slug: row.slug,
-      role: 'owner' as const,
-      tier: (row.tier || 'free') as 'free' | 'pro' | 'enterprise',
-      docCount: 0,
-      memberCount: 0,
-      queryCount: 0,
-      updatedAt: new Date(row.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      color: row.color || '#2563eb',
-    }));
+      // 2. Fetch workspaces where user is a team member
+      const { data: memberRows, error: memberErr } = await supabase
+        .from('workspace_members')
+        .select('workspace_id, role, workspaces(*)')
+        .eq('user_id', userId);
+
+      if (memberErr) console.warn('[api] getWorkspaces member error:', memberErr.message);
+
+      const memberWs = (memberRows || []).map((row: any) => ({
+        ...row.workspaces,
+        assignedRole: row.role,
+      })).filter(w => w && w.id);
+
+      // Combine owned and member workspaces (deduplicated by workspace ID)
+      const allWsMap = new Map<string, any>();
+      (ownedWs || []).forEach(w => allWsMap.set(w.id, { ...w, assignedRole: 'owner' }));
+      memberWs.forEach(w => { if (w.id && !allWsMap.has(w.id)) allWsMap.set(w.id, w); });
+
+      const combined = Array.from(allWsMap.values());
+
+      return combined.map(row => ({
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        slug: row.slug,
+        role: (row.assignedRole || 'owner') as 'owner' | 'editor' | 'viewer',
+        tier: (row.tier || 'free') as 'free' | 'pro' | 'enterprise',
+        docCount: 0,
+        memberCount: 0,
+        queryCount: 0,
+        updatedAt: new Date(row.updated_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        color: row.color || '#2563eb',
+      }));
+    } catch (err) {
+      console.warn('[api] getWorkspaces failed:', err);
+      return [];
+    }
   },
 
   async createWorkspace(name: string, description?: string): Promise<Workspace | null> {

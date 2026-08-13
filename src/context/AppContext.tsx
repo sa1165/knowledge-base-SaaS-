@@ -221,12 +221,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
 
-      const dbWorkspaces = await dbApi.getWorkspaces();
+      // Capture workspace invite parameter from URL or localStorage
+      const urlParams = new URLSearchParams(window.location.search);
+      const inviteWsId = urlParams.get('invite') || urlParams.get('workspace') || localStorage.getItem('pending_invite_ws');
+
+      if (inviteWsId && session?.user?.email) {
+        localStorage.setItem('pending_invite_ws', inviteWsId);
+        await dbApi.addMember(inviteWsId, session.user.email, 'editor');
+      }
+
+      let dbWorkspaces = await dbApi.getWorkspaces();
       setWorkspaces(dbWorkspaces);
 
       if (dbWorkspaces.length > 0) {
-        setActiveWorkspaceState(dbWorkspaces[0]);
-        await loadWorkspaceData(dbWorkspaces[0].id);
+        const targetId = localStorage.getItem('pending_invite_ws');
+        const invitedWs = targetId ? dbWorkspaces.find(w => w.id === targetId) : null;
+        const selectedWs = invitedWs || dbWorkspaces[0];
+
+        setActiveWorkspaceState(selectedWs);
+        await loadWorkspaceData(selectedWs.id);
+
+        if (invitedWs) {
+          localStorage.removeItem('pending_invite_ws');
+        }
       }
     };
 
@@ -239,11 +256,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           name: meta?.full_name || meta?.name || session.user.email?.split('@')[0] || 'User',
           email: session.user.email || '',
         });
-        const dbWorkspaces = await dbApi.getWorkspaces();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const inviteWsId = urlParams.get('invite') || urlParams.get('workspace') || localStorage.getItem('pending_invite_ws');
+
+        if (inviteWsId && session.user.email) {
+          await dbApi.addMember(inviteWsId, session.user.email, 'editor');
+        }
+
+        let dbWorkspaces = await dbApi.getWorkspaces();
         setWorkspaces(dbWorkspaces);
+
         if (dbWorkspaces.length > 0) {
-          setActiveWorkspaceState(dbWorkspaces[0]);
-          await loadWorkspaceData(dbWorkspaces[0].id);
+          const targetId = inviteWsId || localStorage.getItem('pending_invite_ws');
+          const invitedWs = targetId ? dbWorkspaces.find(w => w.id === targetId) : null;
+          const selectedWs = invitedWs || dbWorkspaces[0];
+
+          setActiveWorkspaceState(selectedWs);
+          await loadWorkspaceData(selectedWs.id);
+
+          if (invitedWs) {
+            localStorage.removeItem('pending_invite_ws');
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         setWorkspaces([]);
