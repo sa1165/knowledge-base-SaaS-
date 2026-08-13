@@ -789,8 +789,9 @@ export const dbApi = {
 
   async clearRecentQueries(): Promise<void> {
     try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('docly_recent_queries_cleared_at', new Date().toISOString());
+      const userId = await getAuthUserId();
+      if (typeof window !== 'undefined' && userId) {
+        localStorage.setItem(`docly_recent_queries_cleared_at_${userId}`, new Date().toISOString());
       }
     } catch (err) {
       console.warn('[api] clearRecentQueries failed:', err);
@@ -799,57 +800,59 @@ export const dbApi = {
 
   async getRecentQueries(limit = 50): Promise<RecentQuery[]> {
     if (!isSupabaseConfigured || !supabase) return [];
+    const userId = await getAuthUserId();
+    if (!userId) return [];
+
     try {
       let clearedAtStr: string | null = null;
       if (typeof window !== 'undefined') {
-        clearedAtStr = localStorage.getItem('docly_recent_queries_cleared_at');
+        clearedAtStr = localStorage.getItem(`docly_recent_queries_cleared_at_${userId}`);
       }
 
-      let baseQuery = supabase
+      // Fetch ONLY chat sessions belonging to the current user
+      const { data: userSessions, error: sessErr } = await supabase
+        .from('chat_sessions')
+        .select('id, workspace_id, workspaces(name)')
+        .eq('user_id', userId);
+
+      if (sessErr || !userSessions || userSessions.length === 0) return [];
+
+      const sessionIds = userSessions.map(s => s.id);
+      const sessionMap = new Map<string, { workspaceId: string; workspaceName: string }>();
+      userSessions.forEach((s: any) => {
+        sessionMap.set(s.id, {
+          workspaceId: s.workspace_id,
+          workspaceName: s.workspaces?.name || 'Workspace',
+        });
+      });
+
+      let queryBuilder = supabase
         .from('chat_messages')
-        .select('id, content, created_at, session_id, chat_sessions(workspace_id, workspaces(name))')
-        .eq('role', 'user');
+        .select('id, content, created_at, session_id')
+        .eq('role', 'user')
+        .in('session_id', sessionIds);
 
       if (clearedAtStr) {
-        baseQuery = baseQuery.gt('created_at', clearedAtStr);
+        queryBuilder = queryBuilder.gt('created_at', clearedAtStr);
       }
 
-      const { data, error } = await baseQuery
+      const { data, error } = await queryBuilder
         .order('created_at', { ascending: false })
         .limit(limit);
 
-      if (error) {
-        let simpleQuery = supabase
-          .from('chat_messages')
-          .select('id, content, created_at')
-          .eq('role', 'user');
+      if (error) { console.warn('[api] getRecentQueries:', error.message); return []; }
 
-        if (clearedAtStr) {
-          simpleQuery = simpleQuery.gt('created_at', clearedAtStr);
-        }
-
-        const { data: simpleData } = await simpleQuery
-          .order('created_at', { ascending: false })
-          .limit(limit);
-
-        return (simpleData || []).map((row: any) => ({
+      return (data || []).map((row: any) => {
+        const sessInfo = sessionMap.get(row.session_id);
+        return {
           id: row.id,
           query: row.content,
-          workspaceId: '',
-          workspaceName: 'Workspace',
+          workspaceId: sessInfo?.workspaceId || '',
+          workspaceName: sessInfo?.workspaceName || 'Workspace',
           authorName: 'You',
           timestamp: new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        }));
-      }
-
-      return (data || []).map((row: any) => ({
-        id: row.id,
-        query: row.content,
-        workspaceId: row.chat_sessions?.workspace_id || '',
-        workspaceName: row.chat_sessions?.workspaces?.name || 'Workspace',
-        authorName: 'You',
-        timestamp: new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      }));
+        };
+      });
     } catch (err) {
       console.warn('[api] getRecentQueries failed:', err);
       return [];
