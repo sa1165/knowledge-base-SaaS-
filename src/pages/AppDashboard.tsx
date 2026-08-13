@@ -285,9 +285,9 @@ const InnerDashboard: React.FC = () => {
               borderRadius: 10, padding: '6px',
               boxShadow: '0 12px 32px rgba(0,0,0,0.12)', marginTop: 4, minWidth: 200
             }}>
-              {/* 👑 PERSONAL WORKSPACES */}
+              {/* PERSONAL WORKSPACES */}
               <div style={{ fontSize: 9, fontWeight: 700, color: '#8e8e93', padding: '4px 8px', textTransform: 'uppercase', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Crown size={11} color="#d97706" /> Personal Workspaces
+                <Folder size={11} color="#8e8e93" /> Personal Workspaces
               </div>
               {personalWorkspaces.length === 0 ? (
                 <div style={{ padding: '6px 8px', color: '#a1a1aa', fontSize: 11 }}>None</div>
@@ -315,7 +315,7 @@ const InnerDashboard: React.FC = () => {
                 ))
               )}
 
-              {/* 🤝 SHARED WORKSPACES */}
+              {/* SHARED WORKSPACES */}
               <div style={{ height: 1, background: '#f4f4f3', margin: '6px 0' }} />
               <div style={{ fontSize: 9, fontWeight: 700, color: '#8e8e93', padding: '4px 8px', textTransform: 'uppercase', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Users size={11} color="#2563eb" /> Shared Workspaces

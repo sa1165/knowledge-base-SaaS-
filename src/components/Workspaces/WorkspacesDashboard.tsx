@@ -76,7 +76,7 @@ const WorkspaceCard: React.FC<{
               color: workspace.role === 'owner' ? '#16161a' : workspace.role === 'editor' ? '#2563eb' : '#4b5563',
               fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.04em'
             }}>
-              {workspace.role === 'owner' ? '👑 Owner' : `🤝 ${workspace.role}`}
+              {workspace.role === 'owner' ? 'Owner' : workspace.role}
             </span>
           </div>
           <p style={{ fontSize: 12, color: '#8e8e93', margin: '4px 0 0 0', fontFamily: 'monospace' }}>
@@ -412,10 +412,10 @@ export const WorkspacesDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 👑 Personal Workspaces Section */}
+      {/* Personal Workspaces Section */}
       <div style={{ marginBottom: 36 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'monospace', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          👑 Personal Workspaces (Created by You)
+          <Folder size={14} color="#8e8e93" /> Personal Workspaces (Created by You)
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
           {filteredWorkspaces.filter(w => w.role === 'owner').map(ws => (
@@ -429,11 +429,11 @@ export const WorkspacesDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 🤝 Shared Team Workspaces Section */}
+      {/* Shared Team Workspaces Section */}
       {filteredWorkspaces.some(w => w.role !== 'owner') && (
         <div style={{ marginBottom: 44 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'monospace', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            🤝 Shared Team Workspaces (Joined via Invitation)
+            <Users size={14} color="#2563eb" /> Shared Team Workspaces (Joined via Invitation)
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
             {filteredWorkspaces.filter(w => w.role !== 'owner').map(ws => (
