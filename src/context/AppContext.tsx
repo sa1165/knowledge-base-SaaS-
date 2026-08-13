@@ -277,9 +277,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const urlParams = new URLSearchParams(window.location.search);
       const inviteWsId = urlParams.get('invite') || urlParams.get('workspace') || localStorage.getItem('pending_invite_ws');
 
-      if (inviteWsId && session?.user?.email) {
+      if (inviteWsId) {
         localStorage.setItem('pending_invite_ws', inviteWsId);
-        await dbApi.addMember(inviteWsId, session.user.email, 'editor');
       }
 
       let dbWorkspaces = await dbApi.getWorkspaces();
@@ -292,10 +291,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         setActiveWorkspaceState(selectedWs);
         await loadWorkspaceData(selectedWs.id);
-
-        if (invitedWs) {
-          localStorage.removeItem('pending_invite_ws');
-        }
       }
     };
 
@@ -309,27 +304,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           email: session.user.email || '',
         });
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const inviteWsId = urlParams.get('invite') || urlParams.get('workspace') || localStorage.getItem('pending_invite_ws');
-
-        if (inviteWsId && session.user.email) {
-          await dbApi.addMember(inviteWsId, session.user.email, 'editor');
-        }
-
         let dbWorkspaces = await dbApi.getWorkspaces();
         setWorkspaces(dbWorkspaces);
 
         if (dbWorkspaces.length > 0) {
-          const targetId = inviteWsId || localStorage.getItem('pending_invite_ws');
+          const targetId = localStorage.getItem('pending_invite_ws');
           const invitedWs = targetId ? dbWorkspaces.find(w => w.id === targetId) : null;
           const selectedWs = invitedWs || dbWorkspaces[0];
 
           setActiveWorkspaceState(selectedWs);
           await loadWorkspaceData(selectedWs.id);
-
-          if (invitedWs) {
-            localStorage.removeItem('pending_invite_ws');
-          }
         }
       } else if (event === 'SIGNED_OUT') {
         setWorkspaces([]);
@@ -384,17 +368,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addMember = async (name: string, email: string, role: UserRole) => {
     if (!activeWorkspace) return;
     if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can invite team members.'); return; }
+    // ONLY create the pending invitation request. Do NOT insert into workspace_members until receiver accepts!
     await dbApi.createWorkspaceInvite(activeWorkspace.id, activeWorkspace.name, email, role);
-    const dbMemberId = await dbApi.addMember(activeWorkspace.id, email, role);
-    const newMem: WorkspaceMember = {
-      id: typeof dbMemberId === 'string' ? dbMemberId : `mem-${Date.now()}`,
-      workspaceId: activeWorkspace.id,
-      name,
-      email,
-      role,
-      joinedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    };
-    setMembers(prev => [...prev, newMem]);
   };
 
   const updateMemberRole = async (memberId: string, role: UserRole) => {
