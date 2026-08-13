@@ -20,6 +20,18 @@ export interface WorkspaceMember {
   isYou?: boolean;
 }
 
+export interface WorkspaceInvite {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  inviterName: string;
+  inviterEmail: string;
+  inviteeEmail: string;
+  role: UserRole;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -116,6 +128,12 @@ interface AppContextType {
   selectedDocumentIds: string[];         // empty = search all documents
   setSelectedDocumentIds: (ids: string[]) => void;
 
+  // Workspace Invitations (Friends Request System)
+  pendingInvites: WorkspaceInvite[];
+  acceptInvite: (inviteId: string) => Promise<void>;
+  declineInvite: (inviteId: string) => Promise<void>;
+  fetchPendingInvites: () => Promise<void>;
+
   // Navigation
   activeScreen: AppScreen;
   setActiveScreen: (screen: AppScreen) => void;
@@ -142,8 +160,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string }>({ name: 'User', email: '' });
+  const [pendingInvites, setPendingInvites] = useState<WorkspaceInvite[]>([]);
 
   const chatSessionRef = useRef<string | null>(null);
+
+  const fetchPendingInvites = async () => {
+    if (!currentUser.email) return;
+    const invites = await dbApi.getPendingInvitesForUser(currentUser.email);
+    setPendingInvites(invites);
+  };
+
+  useEffect(() => {
+    if (currentUser.email) {
+      fetchPendingInvites();
+    }
+  }, [currentUser.email]);
+
+  const acceptInvite = async (inviteId: string) => {
+    const target = pendingInvites.find(i => i.id === inviteId);
+    if (!target) return;
+
+    await dbApi.acceptWorkspaceInvite(inviteId, target.workspaceId, target.role);
+    setPendingInvites(prev => prev.filter(i => i.id !== inviteId));
+
+    const freshWorkspaces = await dbApi.getWorkspaces();
+    setWorkspaces(freshWorkspaces);
+    const joinedWs = freshWorkspaces.find(w => w.id === target.workspaceId);
+    if (joinedWs) {
+      setActiveWorkspaceState(joinedWs);
+      await loadWorkspaceData(joinedWs.id);
+    }
+  };
+
+  const declineInvite = async (inviteId: string) => {
+    await dbApi.declineWorkspaceInvite(inviteId);
+    setPendingInvites(prev => prev.filter(i => i.id !== inviteId));
+  };
 
   // ── Safe active workspace setter ───────────────────────────────────────
   const setActiveWorkspace = async (ws: Workspace) => {
@@ -332,6 +384,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addMember = async (name: string, email: string, role: UserRole) => {
     if (!activeWorkspace) return;
     if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can invite team members.'); return; }
+    await dbApi.createWorkspaceInvite(activeWorkspace.id, activeWorkspace.name, email, role);
     const dbMemberId = await dbApi.addMember(activeWorkspace.id, email, role);
     const newMem: WorkspaceMember = {
       id: typeof dbMemberId === 'string' ? dbMemberId : `mem-${Date.now()}`,
@@ -638,6 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isExpertMode, setIsExpertMode,
       createNewChatSession, renameChatSession, deleteChatSession, switchChatSession,
       selectedDocumentIds, setSelectedDocumentIds,
+      pendingInvites, acceptInvite, declineInvite, fetchPendingInvites,
       activeScreen, setActiveScreen, activeTab, setActiveTab
     }}>
       {children}

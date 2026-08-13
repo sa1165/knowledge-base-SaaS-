@@ -66,9 +66,19 @@ const WorkspaceCard: React.FC<{
           <Folder size={20} fill="#ffffff" stroke="none" />
         </div>
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#16161a', margin: 0, lineHeight: 1.3 }}>
-            {workspace.name}
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#16161a', margin: 0, lineHeight: 1.3 }}>
+              {workspace.name}
+            </h3>
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 6,
+              background: workspace.role === 'owner' ? '#f4f4f3' : workspace.role === 'editor' ? '#eff6ff' : '#f3f4f6',
+              color: workspace.role === 'owner' ? '#16161a' : workspace.role === 'editor' ? '#2563eb' : '#4b5563',
+              fontFamily: 'monospace', textTransform: 'uppercase', letterSpacing: '0.04em'
+            }}>
+              {workspace.role === 'owner' ? '👑 Owner' : `🤝 ${workspace.role}`}
+            </span>
+          </div>
           <p style={{ fontSize: 12, color: '#8e8e93', margin: '4px 0 0 0', fontFamily: 'monospace' }}>
             Updated {workspace.updatedAt}
           </p>
@@ -380,10 +390,10 @@ export const WorkspacesDashboard: React.FC = () => {
         />
       </div>
 
-      {/* Your Workspaces Section */}
+      {/* Search Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
-        <h2 className="font-serif" style={{ fontSize: 18, fontWeight: 400, color: '#16161a', margin: 0 }}>
-          Your workspaces
+        <h2 className="font-serif" style={{ fontSize: 20, fontWeight: 400, color: '#16161a', margin: 0 }}>
+          Workspaces Overview
         </h2>
         <div style={{ position: 'relative' }}>
           <Search size={14} color="#8e8e93" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
@@ -402,19 +412,40 @@ export const WorkspacesDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Workspaces Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 18, marginBottom: 44 }}>
-        {filteredWorkspaces.map(ws => (
-          <WorkspaceCard 
-            key={ws.id} 
-            workspace={ws} 
-            onClick={() => handleOpenWorkspace(ws)} 
-          />
-        ))}
-
-        {/* Dashed "+ New workspace" Card */}
-        <NewWorkspaceCard onClick={() => setShowModal(true)} />
+      {/* 👑 Personal Workspaces Section */}
+      <div style={{ marginBottom: 36 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'monospace', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+          👑 Personal Workspaces (Created by You)
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
+          {filteredWorkspaces.filter(w => w.role === 'owner').map(ws => (
+            <WorkspaceCard 
+              key={ws.id} 
+              workspace={ws} 
+              onClick={() => handleOpenWorkspace(ws)} 
+            />
+          ))}
+          <NewWorkspaceCard onClick={() => setShowModal(true)} />
+        </div>
       </div>
+
+      {/* 🤝 Shared Team Workspaces Section */}
+      {filteredWorkspaces.some(w => w.role !== 'owner') && (
+        <div style={{ marginBottom: 44 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'monospace', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            🤝 Shared Team Workspaces (Joined via Invitation)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
+            {filteredWorkspaces.filter(w => w.role !== 'owner').map(ws => (
+              <WorkspaceCard 
+                key={ws.id} 
+                workspace={ws} 
+                onClick={() => handleOpenWorkspace(ws)} 
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Queries Section */}
       <div style={{ marginTop: 40 }}>

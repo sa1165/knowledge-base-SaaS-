@@ -311,6 +311,132 @@ export const dbApi = {
     }));
   },
 
+  // ══════════════════════════════════════════════════════════════════
+  // WORKSPACE INVITATIONS (SOCIAL-MEDIA STYLE FRIENDS REQUEST SYSTEM)
+  // ══════════════════════════════════════════════════════════════════
+
+  async createWorkspaceInvite(workspaceId: string, workspaceName: string, inviteeEmail: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
+    if (!isSupabaseConfigured || !supabase) return `inv-${Date.now()}`;
+
+    const currentUserId = await getAuthUserId();
+    const cleanEmail = inviteeEmail.trim().toLowerCase();
+
+    try {
+      // Fetch inviter user info
+      let inviterName = 'Teammate';
+      let inviterEmail = '';
+
+      if (currentUserId) {
+        const { data: u } = await supabase.from('users').select('name, email').eq('id', currentUserId).single();
+        if (u) {
+          inviterName = u.name || inviterName;
+          inviterEmail = u.email || '';
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('workspace_invitations')
+        .insert({
+          workspace_id: workspaceId,
+          workspace_name: workspaceName,
+          inviter_user_id: currentUserId || 'system',
+          inviter_name: inviterName,
+          inviter_email: inviterEmail,
+          invitee_email: cleanEmail,
+          role,
+          status: 'pending',
+        })
+        .select('id')
+        .single();
+
+      if (error) { console.error('[api] createWorkspaceInvite:', error.message); return null; }
+
+      // Optional Auth Mailer dispatch
+      try {
+        await supabase.auth.signInWithOtp({
+          email: cleanEmail,
+          options: { emailRedirectTo: `${window.location.origin}/app?invite=${workspaceId}` },
+        });
+      } catch (e) { /* silent fallback */ }
+
+      return data.id;
+    } catch (err) {
+      console.warn('[api] createWorkspaceInvite fallback:', err);
+      return `inv-${Date.now()}`;
+    }
+  },
+
+  async getPendingInvitesForUser(userEmail: string): Promise<any[]> {
+    if (!isSupabaseConfigured || !supabase || !userEmail) return [];
+    try {
+      const { data, error } = await supabase
+        .from('workspace_invitations')
+        .select('*')
+        .eq('invitee_email', userEmail.trim().toLowerCase())
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) { console.warn('[api] getPendingInvitesForUser:', error.message); return []; }
+
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        workspaceId: row.workspace_id,
+        workspaceName: row.workspace_name,
+        inviterName: row.inviter_name || 'Teammate',
+        inviterEmail: row.inviter_email || '',
+        inviteeEmail: row.invitee_email,
+        role: row.role as 'owner' | 'editor' | 'viewer',
+        status: row.status,
+        createdAt: new Date(row.created_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      }));
+    } catch (err) {
+      console.warn('[api] getPendingInvitesForUser failed:', err);
+      return [];
+    }
+  },
+
+  async acceptWorkspaceInvite(inviteId: string, workspaceId: string, role: 'owner' | 'editor' | 'viewer'): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const userId = await getAuthUserId();
+    if (!userId) return false;
+
+    try {
+      // 1. Mark invitation status as accepted
+      await supabase
+        .from('workspace_invitations')
+        .update({ status: 'accepted' })
+        .eq('id', inviteId);
+
+      // 2. Add user to workspace_members
+      const { error: memErr } = await supabase
+        .from('workspace_members')
+        .insert({ workspace_id: workspaceId, user_id: userId, role });
+
+      if (memErr && !memErr.message.includes('duplicate')) {
+        console.error('[api] acceptWorkspaceInvite member add:', memErr.message);
+      }
+
+      return true;
+    } catch (err) {
+      console.warn('[api] acceptWorkspaceInvite failed:', err);
+      return false;
+    }
+  },
+
+  async declineWorkspaceInvite(inviteId: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    try {
+      await supabase
+        .from('workspace_invitations')
+        .update({ status: 'declined' })
+        .eq('id', inviteId);
+      return true;
+    } catch (err) {
+      console.warn('[api] declineWorkspaceInvite failed:', err);
+      return false;
+    }
+  },
+
   async addMember(workspaceId: string, email: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
     if (!isSupabaseConfigured || !supabase) return `m-${Date.now()}`;
 

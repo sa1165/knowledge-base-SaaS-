@@ -56,6 +56,19 @@ export const workspaceMembers = pgTable('workspace_members', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+export const workspaceInvitations = pgTable('workspace_invitations', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  workspaceName: text('workspace_name').notNull(),
+  inviterUserId: text('inviter_user_id').notNull().references(() => users.id),
+  inviterName: text('inviter_name'),
+  inviterEmail: text('inviter_email'),
+  inviteeEmail: text('invitee_email').notNull(),
+  role: text('role', { enum: ['owner', 'editor', 'viewer'] }).default('editor').notNull(),
+  status: text('status', { enum: ['pending', 'accepted', 'declined'] }).default('pending').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export const documents = pgTable('documents', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
