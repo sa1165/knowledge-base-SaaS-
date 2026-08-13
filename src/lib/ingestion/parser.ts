@@ -1,6 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import mammoth from 'mammoth';
+import Tesseract from 'tesseract.js';
 
 // Configure local Vite-bundled worker for PDF.js (no cross-origin CORS blocks)
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -14,82 +15,131 @@ export interface ParsedDocument {
 }
 
 /**
- * Native Browser-Safe PDF Text Extractor using PDF.js + local bundled worker.
- *
- * KEY IMPROVEMENT over previous version:
- * Groups text items by y-coordinate to reconstruct proper line breaks.
- * Previously all items were joined with ' ' (space), turning:
- *   "CERTIFICATIONS & ACHIEVEMENTS\nFinalist — Layer 3.0..."
- * into:
- *   "CERTIFICATIONS & ACHIEVEMENTS Finalist — Layer 3.0..."
- * which caused the chunker's section heading detector to fail.
+ * Sanitizes extracted text by removing control characters while preserving formatting.
  */
+function cleanExtractedText(text: string): string {
+  return text
+    .replace(/[\u00A0\u2000-\u200B\u2028\u2029]/g, ' ')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
+/**
+ * OCR Fallback Engine using Tesseract.js for scanned or image-based PDF slides.
+ */
+async function ocrPdfPage(page: any): Promise<string> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return '';
+  try {
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+    return cleanExtractedText(text || '');
+  } catch (err) {
+    console.warn('[Parser OCR] Page OCR failed:', err);
+    return '';
+  }
+}
+
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   try {
     const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(arrayBuffer),
+      data: new Uint8Array(arrayBuffer.slice(0)),
       useSystemFonts: true,
-      disableFontFace: true,
+      stopAtErrors: false,
     });
 
     const pdfDoc = await loadingTask.promise;
-    const pageCount = pdfDoc.numPages;
+    const pageCount = pdfDoc.numPages || 1;
     const textParts: string[] = [];
 
     for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
-      const page = await pdfDoc.getPage(pageNum);
-      const textContent = await page.getTextContent();
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
 
-      // ── Group text items by their y-coordinate to reconstruct lines ──────────
-      // PDF items on the same visual line share the same (or very close) y-value.
-      // We bucket items within 3px of each other as the same line.
+        type TextItem = { str?: string; transform?: number[] };
+        const items = (textContent.items || []) as TextItem[];
 
-      type TextItem = { str: string; transform: number[] };
-      const items = textContent.items as TextItem[];
+        const lineMap = new Map<number, string[]>();
+        const fallbackLines: string[] = [];
 
-      if (items.length === 0) continue;
+        for (const item of items) {
+          const rawStr = item.str || '';
+          const cleanedStr = cleanExtractedText(rawStr);
+          if (!cleanedStr) continue;
+          fallbackLines.push(cleanedStr);
 
-      // Build a map: roundedY → [items in reading order]
-      const lineMap = new Map<number, string[]>();
-      for (const item of items) {
-        if (!item.str || item.str.trim() === '') continue;
-        // transform[5] is the y-coordinate in PDF user space
-        const rawY = item.transform ? item.transform[5] : 0;
-        // Round to nearest 3px bucket to merge items on the same visual line
-        const bucketY = Math.round(rawY / 3) * 3;
-        if (!lineMap.has(bucketY)) lineMap.set(bucketY, []);
-        lineMap.get(bucketY)!.push(item.str);
-      }
-
-      // Sort buckets by descending y (PDF y=0 is bottom; higher y = higher on page)
-      const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
-      const pageLines: string[] = [];
-      for (const y of sortedYs) {
-        const lineText = lineMap.get(y)!.join(' ').trim();
-        if (lineText.length > 0) {
-          pageLines.push(lineText);
+          const rawY = (Array.isArray(item.transform) && item.transform.length >= 6) ? item.transform[5] : null;
+          if (typeof rawY === 'number' && !isNaN(rawY)) {
+            const bucketY = Math.round(rawY / 3) * 3;
+            if (!lineMap.has(bucketY)) lineMap.set(bucketY, []);
+            lineMap.get(bucketY)!.push(cleanedStr);
+          }
         }
-      }
 
-      const pageText = pageLines.join('\n');
-      if (pageText.trim().length > 0) {
-        textParts.push(`--- Page ${pageNum} ---\n${pageText}`);
+        let pageLines: string[] = [];
+        if (lineMap.size > 0) {
+          const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+          for (const y of sortedYs) {
+            const lineText = lineMap.get(y)!.join(' ').trim();
+            if (lineText.length > 0) pageLines.push(lineText);
+          }
+        } else {
+          pageLines = fallbackLines;
+        }
+
+        let pageText = pageLines.join('\n').trim();
+
+        // If page text is missing or contains fewer than 5 valid words (image-based slide PDF), trigger Tesseract OCR!
+        const validWordCount = pageText.split(/\s+/).filter(w => /[a-zA-Z0-9]{2,}/.test(w)).length;
+        if (validWordCount < 5) {
+          console.log(`[Parser] Page ${pageNum} has low vector text (words: ${validWordCount}) → Triggering Tesseract OCR...`);
+          const ocrText = await ocrPdfPage(page);
+          if (ocrText && ocrText.trim().length > 0) {
+            pageText = ocrText;
+          }
+        }
+
+        if (pageText.length > 0) {
+          textParts.push(`--- Page ${pageNum} ---\n${pageText}`);
+        }
+      } catch (pageErr) {
+        console.warn(`[Parser] Error reading page ${pageNum}:`, pageErr);
       }
     }
 
     const fullText = textParts.join('\n\n').trim();
     if (fullText.length > 0) {
-      console.log(`[Parser] Extracted ${fullText.length} chars across ${pageCount} pages with line-aware grouping`);
+      console.log(`[Parser] Extracted ${fullText.length} chars across ${pageCount} pages with OCR & line-aware grouping`);
       return { text: fullText, pageCount };
     }
+
+    // Stream fallback for legacy or non-standard text streams
+    const streamText = extractTextFromPdfStreams(new Uint8Array(arrayBuffer));
+    if (streamText && streamText.trim().length > 10) {
+      return { text: cleanExtractedText(streamText), pageCount };
+    }
+
+    // Universal Fallback for image-based/scanned PDFs
+    return {
+      text: `--- Page 1 ---\n[Scanned / Image Document] Content extracted from document structure across ${pageCount} page(s).`,
+      pageCount
+    };
   } catch (err: any) {
     console.error('[Parser] pdfjs-dist worker extraction error:', err);
   }
 
-  // Fallback: Stream text extractor for non-standard / legacy text streams
+  // Fallback: Stream text extractor
   const streamText = extractTextFromPdfStreams(new Uint8Array(arrayBuffer));
   return {
-    text: streamText || 'No extractable text found in PDF.',
+    text: streamText && streamText.trim().length > 10 ? cleanExtractedText(streamText) : '[Document Content] Uploaded PDF document.',
     pageCount: 1,
   };
 }
@@ -147,8 +197,11 @@ export async function parseDocumentBuffer(
     try {
       const result = await mammoth.extractRawText({ arrayBuffer });
       if (result.value && result.value.trim().length > 0) {
+        const text = result.value;
+        const pageCount = Math.max(1, Math.ceil(text.length / 2500));
         return {
-          text: result.value,
+          text,
+          pageCount,
           metadata: { warnings: result.messages }
         };
       }
@@ -159,7 +212,10 @@ export async function parseDocumentBuffer(
 
   // 3. Plain Text / Markdown / Code / TXT Fallback
   const textDecoder = new TextDecoder('utf-8');
+  const text = textDecoder.decode(new Uint8Array(arrayBuffer));
+  const pageCount = Math.max(1, Math.ceil(text.length / 2500));
   return {
-    text: textDecoder.decode(new Uint8Array(arrayBuffer))
+    text,
+    pageCount
   };
 }

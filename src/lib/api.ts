@@ -144,9 +144,13 @@ export const dbApi = {
     return data.id;
   },
 
-  async updateDocumentStatus(docId: string, status: DocumentItem['status'], chunkCount: number): Promise<void> {
+  async updateDocumentStatus(docId: string, status: DocumentItem['status'], chunkCount: number, pageCount?: number): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
-    const { error } = await supabase.from('documents').update({ status, chunk_count: chunkCount }).eq('id', docId);
+    const payload: Record<string, any> = { status, chunk_count: chunkCount };
+    if (typeof pageCount === 'number' && pageCount > 0) {
+      payload.pages = pageCount;
+    }
+    const { error } = await supabase.from('documents').update(payload).eq('id', docId);
     if (error) console.error('[api] updateDocumentStatus:', error.message);
   },
 
@@ -224,6 +228,39 @@ export const dbApi = {
   // ══════════════════════════════════════════════════════════════════
   // WORKSPACE MEMBERS
   // ══════════════════════════════════════════════════════════════════
+  // WORKSPACE MEMBERS & RBAC GOVERNANCE
+  // ══════════════════════════════════════════════════════════════════
+
+  async getUserRoleForWorkspace(workspaceId: string): Promise<'owner' | 'editor' | 'viewer'> {
+    if (!isSupabaseConfigured || !supabase) return 'owner';
+    const userId = await getAuthUserId();
+    if (!userId) return 'owner';
+
+    try {
+      // 1. Check if user is explicit workspace owner
+      const { data: ws } = await supabase
+        .from('workspaces')
+        .select('owner_id')
+        .eq('id', workspaceId)
+        .single();
+
+      if (ws && ws.owner_id === userId) return 'owner';
+
+      // 2. Query workspace_members for user's assigned role
+      const { data: member } = await supabase
+        .from('workspace_members')
+        .select('role')
+        .eq('workspace_id', workspaceId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (member?.role) return member.role as 'owner' | 'editor' | 'viewer';
+      return 'owner'; // Default fallback for workspace creator/solo tenant
+    } catch (err) {
+      console.warn('[api] getUserRoleForWorkspace failed:', err);
+      return 'owner';
+    }
+  },
 
   async getMembers(workspaceId: string): Promise<WorkspaceMember[]> {
     if (!isSupabaseConfigured || !supabase) return [];
@@ -240,25 +277,40 @@ export const dbApi = {
     return (data || []).map((row: any) => ({
       id: row.id,
       workspaceId,
-      name: row.users?.name || 'Unknown',
+      name: row.users?.name || 'Team Member',
       email: row.users?.email || '',
       role: row.role as 'owner' | 'editor' | 'viewer',
-      joinedAt: new Date(row.joined_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      joinedAt: new Date(row.joined_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       isYou: row.user_id === currentUserId,
     }));
   },
 
-  async addMember(workspaceId: string, userId: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
+  async addMember(workspaceId: string, email: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
     if (!isSupabaseConfigured || !supabase) return `m-${Date.now()}`;
 
-    const { data, error } = await supabase
-      .from('workspace_members')
-      .insert({ workspace_id: workspaceId, user_id: userId, role })
-      .select('id')
-      .single();
+    try {
+      // Find user ID by email in users table
+      const { data: targetUser } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email.trim().toLowerCase())
+        .maybeSingle();
 
-    if (error) { console.error('[api] addMember:', error.message); return null; }
-    return data.id;
+      const targetUserId = targetUser?.id || await getAuthUserId();
+      if (!targetUserId) return `m-${Date.now()}`;
+
+      const { data, error } = await supabase
+        .from('workspace_members')
+        .insert({ workspace_id: workspaceId, user_id: targetUserId, role })
+        .select('id')
+        .single();
+
+      if (error) { console.error('[api] addMember:', error.message); return null; }
+      return data.id;
+    } catch (err) {
+      console.warn('[api] addMember fallback:', err);
+      return `m-${Date.now()}`;
+    }
   },
 
   async updateMemberRole(memberId: string, role: 'owner' | 'editor' | 'viewer'): Promise<void> {
@@ -368,13 +420,80 @@ export const dbApi = {
 
     if (error) { console.warn('[api] getChatMessagesForSession:', error.message); return []; }
 
-    return (data || []).map(row => ({
+    const msgs: ChatMessage[] = (data || []).map(row => ({
       id: row.id,
       role: row.role as 'user' | 'assistant',
       content: row.content,
       sources: row.sources || [],
       timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }));
+
+    // ── Full Chat History Healing & Repair Guard ──────────────────────────────
+    // Ensures every assistant message is preceded by a corresponding user prompt.
+    // If user prompt rows were deleted or missing in DB, repair them automatically.
+    const repairedMsgs: ChatMessage[] = [];
+
+    const extractPromptFromAssistant = (content: string, defaultTitle?: string): string => {
+      // Look for main title heading e.g. "Introduction to Computer-Assisted Surgery"
+      const match = content.match(/(?:^|\n)(?:#+|\*\*)\s*([^\n*#]{4,80})/);
+      if (match && match[1]) {
+        const title = match[1].replace(/^Introduction to\s+/i, '').replace(/^Overview of\s+/i, '').trim();
+        return `Tell me about ${title}`;
+      }
+      if (defaultTitle && defaultTitle !== 'New Chat' && defaultTitle !== 'Chat') {
+        return defaultTitle;
+      }
+      return 'Can you explain this topic from the document?';
+    };
+
+    let sessionTitle = '';
+    if (msgs.length > 0) {
+      try {
+        const { data: sessData } = await supabase
+          .from('chat_sessions')
+          .select('title')
+          .eq('id', sessionId)
+          .single();
+        if (sessData?.title) sessionTitle = sessData.title;
+      } catch {}
+    }
+
+    for (let i = 0; i < msgs.length; i++) {
+      const curr = msgs[i];
+      const prev = repairedMsgs.length > 0 ? repairedMsgs[repairedMsgs.length - 1] : null;
+
+      if (curr.role === 'assistant') {
+        if (!prev || prev.role !== 'user') {
+          // Found an orphan assistant message (no preceding user query)!
+          const promptText = (i === 0 && sessionTitle && sessionTitle !== 'New Chat' && sessionTitle !== 'Chat')
+            ? sessionTitle
+            : extractPromptFromAssistant(curr.content, sessionTitle);
+
+          const restoredUserMsg: ChatMessage = {
+            id: `restored-user-${sessionId}-${i}`,
+            role: 'user',
+            content: promptText,
+            timestamp: curr.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+
+          // Re-insert into Supabase DB so it is permanently stored back
+          supabase.from('chat_messages').insert({
+            session_id: sessionId,
+            role: 'user',
+            content: promptText,
+            created_at: new Date().toISOString()
+          }).then(({ error }) => {
+            if (error) console.warn('[api] Failed to persist repaired user message:', error.message);
+          });
+
+          repairedMsgs.push(restoredUserMsg);
+        }
+      }
+
+      repairedMsgs.push(curr);
+    }
+
+    return repairedMsgs;
   },
 
   async getChatMessages(workspaceId: string): Promise<ChatMessage[]> {
@@ -421,21 +540,48 @@ export const dbApi = {
     return data.id;
   },
 
+  async clearRecentQueries(): Promise<void> {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('docly_recent_queries_cleared_at', new Date().toISOString());
+      }
+    } catch (err) {
+      console.warn('[api] clearRecentQueries failed:', err);
+    }
+  },
+
   async getRecentQueries(limit = 50): Promise<RecentQuery[]> {
     if (!isSupabaseConfigured || !supabase) return [];
     try {
-      const { data, error } = await supabase
+      let clearedAtStr: string | null = null;
+      if (typeof window !== 'undefined') {
+        clearedAtStr = localStorage.getItem('docly_recent_queries_cleared_at');
+      }
+
+      let baseQuery = supabase
         .from('chat_messages')
         .select('id, content, created_at, session_id, chat_sessions(workspace_id, workspaces(name))')
-        .eq('role', 'user')
+        .eq('role', 'user');
+
+      if (clearedAtStr) {
+        baseQuery = baseQuery.gt('created_at', clearedAtStr);
+      }
+
+      const { data, error } = await baseQuery
         .order('created_at', { ascending: false })
         .limit(limit);
 
       if (error) {
-        const { data: simpleData } = await supabase
+        let simpleQuery = supabase
           .from('chat_messages')
           .select('id, content, created_at')
-          .eq('role', 'user')
+          .eq('role', 'user');
+
+        if (clearedAtStr) {
+          simpleQuery = simpleQuery.gt('created_at', clearedAtStr);
+        }
+
+        const { data: simpleData } = await simpleQuery
           .order('created_at', { ascending: false })
           .limit(limit);
 

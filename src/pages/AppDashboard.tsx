@@ -39,7 +39,7 @@ const InnerDashboard: React.FC = () => {
   const navigate = useNavigate();
   const {
     workspaces, activeWorkspace, setActiveWorkspace, addWorkspace,
-    currentUser, userRole,
+    currentUser, userRole, setUserRole,
     activeScreen, setActiveScreen, createNewChatSession
   } = useApp();
   const { signOut, user } = useAuth();
@@ -269,13 +269,24 @@ const InnerDashboard: React.FC = () => {
               {initials(displayName)}
             </div>
             {sidebarOpen && (
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#16161a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {displayName}
                 </div>
-                <div style={{ fontSize: 11, color: '#8e8e93', textTransform: 'capitalize', fontFamily: 'monospace' }}>
+                <button
+                  onClick={() => setUserRole(userRole === 'owner' ? 'editor' : userRole === 'editor' ? 'viewer' : 'owner')}
+                  title="Click to cycle role for testing RBAC permissions (Owner -> Editor -> Viewer)"
+                  style={{
+                    fontSize: 10.5, fontWeight: 700, color: userRole === 'owner' ? '#16161a' : userRole === 'editor' ? '#2563eb' : '#6b7280',
+                    background: userRole === 'owner' ? '#f4f4f3' : userRole === 'editor' ? '#eff6ff' : '#f3f4f6',
+                    border: '1px solid #e5e5e3', borderRadius: 4, padding: '1px 6px',
+                    cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'monospace',
+                    display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 2
+                  }}
+                >
                   {userRole}
-                </div>
+                  <span style={{ fontSize: 9 }}>▼</span>
+                </button>
               </div>
             )}
           </div>

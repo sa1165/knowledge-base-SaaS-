@@ -4,7 +4,7 @@ import { RetrievalResult } from '../../lib/rag/hybrid-retrieval';
 import {
   Send, Bot, FileText, X, Search, Plus, Trash2, Edit2, Check,
   CheckCircle2, AlertCircle, Loader2, Sparkles, BookOpen, MessageSquare, History, User,
-  HelpCircle, ArrowRight
+  HelpCircle, ArrowRight, Brain
 } from 'lucide-react';
 
 function parseFollowUpQuestions(content: string): { cleanContent: string; followUps: string[] } {
@@ -161,7 +161,8 @@ export const HybridRagChat: React.FC = () => {
     messages, sendMessage, isSending, activeWorkspace, documents, setActiveScreen,
     chatSessions, activeSessionId, createNewChatSession, renameChatSession,
     deleteChatSession, switchChatSession,
-    selectedDocumentIds, setSelectedDocumentIds
+    selectedDocumentIds, setSelectedDocumentIds,
+    isExpertMode, setIsExpertMode
   } = useApp();
 
   const [input, setInput] = useState('');
@@ -491,18 +492,56 @@ export const HybridRagChat: React.FC = () => {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: '#16161a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Sparkles size={14} />
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: isExpertMode ? '#4f46e5' : '#16161a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}>
+              {isExpertMode ? <Brain size={15} /> : <Sparkles size={14} />}
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#16161a' }}>
-                Flagship RAG Engine <span style={{ fontSize: 11, fontWeight: 600, color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: 10, marginLeft: 6 }}>Groq 3-Key + Gemini</span>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#16161a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                Docly AI
+                {isExpertMode && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#4338ca', background: '#e0e7ff', padding: '2px 8px', borderRadius: 10, border: '1px solid #c7d2fe', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <Brain size={11} /> Deep Think Active
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 11, color: '#8e8e93' }}>
-                Strict grounding · Zero hallucinations · Fast Typewriter Stream
+                {isExpertMode ? 'Exhaustive analytical explanations · DeepSeek-style reasoning · Grounded RAG' : 'Strict grounding · Zero hallucinations · Fast Typewriter Stream'}
               </div>
             </div>
           </div>
+
+          {/* Expert Mode (Deep Think) Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsExpertMode(!isExpertMode)}
+            title="Expert Mode: Generates exhaustive, deep-dive analytical explanations (DeepSeek Deep Think style)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
+              border: isExpertMode ? '1px solid #6366f1' : '1px solid #e5e7eb',
+              background: isExpertMode ? 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' : '#f9fafb',
+              color: isExpertMode ? '#ffffff' : '#4b5563',
+              boxShadow: isExpertMode ? '0 0 12px rgba(99, 102, 241, 0.4)' : 'none',
+              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+            }}
+          >
+            <Brain size={15} color={isExpertMode ? '#ffffff' : '#6366f1'} />
+            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.01em' }}>
+              Expert Mode {isExpertMode ? 'ON' : 'OFF'}
+            </span>
+            <div style={{
+              width: 24, height: 14, borderRadius: 10,
+              background: isExpertMode ? '#ffffff' : '#d1d5db',
+              display: 'flex', alignItems: 'center', padding: 2,
+              justifyContent: isExpertMode ? 'flex-end' : 'flex-start',
+              transition: 'all 0.2s ease'
+            }}>
+              <div style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: isExpertMode ? '#4f46e5' : '#ffffff'
+              }} />
+            </div>
+          </button>
         </div>
 
         {/* Message Stream */}
@@ -622,12 +661,18 @@ export const HybridRagChat: React.FC = () => {
           {/* Thinking / Searching Indicator */}
           {isSending && (
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: '#16161a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Bot size={15} color="#ffffff" />
+              <div style={{ width: 30, height: 30, borderRadius: 8, background: isExpertMode ? '#4f46e5' : '#16161a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {isExpertMode ? <Brain size={15} color="#ffffff" /> : <Bot size={15} color="#ffffff" />}
               </div>
-              <div style={{ background: '#ffffff', border: '1px solid #eaeaea', borderRadius: '4px 18px 18px 18px', padding: '12px 18px', fontSize: 13, color: '#8e8e93', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Loader2 size={14} color="#2563eb" style={{ animation: 'spin 1.2s linear infinite' }} />
-                <span>Running Hybrid Vector + BM25 Reranker Search…</span>
+              <div style={{
+                background: isExpertMode ? '#f5f3ff' : '#ffffff',
+                border: isExpertMode ? '1px solid #c7d2fe' : '1px solid #eaeaea',
+                borderRadius: '4px 18px 18px 18px', padding: '12px 18px', fontSize: 13,
+                color: isExpertMode ? '#4338ca' : '#8e8e93', display: 'flex', alignItems: 'center', gap: 8,
+                fontWeight: isExpertMode ? 600 : 400
+              }}>
+                <Loader2 size={14} color={isExpertMode ? '#6366f1' : '#2563eb'} style={{ animation: 'spin 1.2s linear infinite' }} />
+                <span>{isExpertMode ? '🧠 Deep Think Engine Active: Generating exhaustive masterclass analysis…' : 'Running Hybrid Vector + BM25 Reranker Search…'}</span>
               </div>
             </div>
           )}
@@ -640,27 +685,29 @@ export const HybridRagChat: React.FC = () => {
           <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 10 }}>
             <input
               type="text"
-              placeholder={hasIndexedDocs ? "Ask a question about your documents..." : "Upload documents first to enable chat..."}
+              placeholder={hasIndexedDocs ? (isExpertMode ? "Ask a question (Expert Mode: Exhaustive Deep Analysis enabled)..." : "Ask a question about your documents...") : "Upload documents first to enable chat..."}
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={isSending || !hasIndexedDocs}
               style={{
-                flex: 1, padding: '13px 18px', borderRadius: 10, border: '1px solid #eaeaea',
-                background: hasIndexedDocs ? '#fcfcfb' : '#f4f4f3', fontSize: 14, color: '#16161a',
-                outline: 'none', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+                flex: 1, padding: '13px 18px', borderRadius: 10,
+                border: isExpertMode ? '1.5px solid #a5b4fc' : '1px solid #eaeaea',
+                background: hasIndexedDocs ? (isExpertMode ? '#f5f3ff' : '#fcfcfb') : '#f4f4f3',
+                fontSize: 14, color: '#16161a', outline: 'none', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
               }}
             />
             <button
               type="submit"
               disabled={!input.trim() || isSending || !hasIndexedDocs}
               style={{
-                background: (!input.trim() || isSending || !hasIndexedDocs) ? '#e5e5e3' : '#16161a',
+                background: (!input.trim() || isSending || !hasIndexedDocs) ? '#e5e5e3' : (isExpertMode ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : '#16161a'),
                 color: '#ffffff', border: 'none', borderRadius: 10, padding: '0 20px',
                 cursor: (!input.trim() || isSending || !hasIndexedDocs) ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center'
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: isExpertMode && input.trim() ? '0 0 12px rgba(99, 102, 241, 0.4)' : 'none'
               }}
             >
-              <Send size={16} />
+              {isExpertMode ? <Brain size={16} /> : <Send size={16} />}
             </button>
           </form>
         </div>

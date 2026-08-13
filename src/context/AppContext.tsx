@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { processDocumentIngestion } from '../lib/ingestion/pipeline';
 import { performHybridSearch, RetrievalResult, globalVectorIndex } from '../lib/rag/hybrid-retrieval';
-import { generateGroundedResponse } from '../lib/rag/llm-provider';
+import { generateGroundedResponse, contextualizeQuery } from '../lib/rag/llm-provider';
 import { dbApi } from '../lib/api';
 import { storage } from '../lib/storage';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
@@ -102,8 +102,11 @@ interface AppContextType {
   activeSessionId: string | null;
   messages: ChatMessage[];
   recentQueries: RecentQuery[];
+  clearRecentQueries: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   isSending: boolean;
+  isExpertMode: boolean;
+  setIsExpertMode: (val: boolean) => void;
   createNewChatSession: () => Promise<void>;
   renameChatSession: (sessionId: string, newTitle: string) => Promise<void>;
   deleteChatSession: (sessionId: string) => Promise<void>;
@@ -133,6 +136,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeScreen, setActiveScreen] = useState<AppScreen>('workspaces');
   const [activeTab, setActiveTab] = useState<AppTab>('chat');
   const [isSending, setIsSending] = useState(false);
+  const [isExpertMode, setIsExpertMode] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSessionItem[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -165,15 +169,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSessionId(null);
     chatSessionRef.current = null;
 
-    const [dbDocs, dbMembers, dbSessions, dbChunks, dbQueries] = await Promise.all([
+    const [dbDocs, dbMembers, dbSessions, dbChunks, dbQueries, resolvedRole] = await Promise.all([
       dbApi.getDocuments(workspaceId),
       dbApi.getMembers(workspaceId),
       dbApi.getChatSessions(workspaceId),
       dbApi.getWorkspaceChunks(workspaceId),
       dbApi.getRecentQueries(50),
+      dbApi.getUserRoleForWorkspace(workspaceId),
     ]);
     setDocuments(dbDocs);
     setMembers(dbMembers);
+    setUserRole(resolvedRole);
     // Filter out any legacy empty 'New Chat' sessions from DB list
     const validSessions = dbSessions.filter(s => s.title !== 'New Chat' && s.title !== 'Chat');
     setChatSessions(validSessions);
@@ -305,11 +311,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateMemberRole = async (memberId: string, role: UserRole) => {
+    if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can manage team roles.'); return; }
     await dbApi.updateMemberRole(memberId, role);
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role } : m));
   };
 
   const removeMember = async (memberId: string) => {
+    if (userRole !== 'owner') { alert('Permission Denied: Only Workspace Owners can remove team members.'); return; }
     await dbApi.removeMember(memberId);
     setMembers(prev => prev.filter(m => m.id !== memberId));
   };
@@ -346,8 +354,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const arrayBuffer = await file.arrayBuffer();
       const result = await processDocumentIngestion(activeWorkspace.id, docId, file.name, arrayBuffer, file.type);
 
-      setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: result.status, chunkCount: result.chunkCount } : d));
-      await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount);
+      setDocuments(prev => prev.map(d => d.id === docId ? { 
+        ...d, 
+        status: result.status, 
+        chunkCount: result.chunkCount,
+        pages: result.pageCount || d.pages
+      } : d));
+      await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount, result.pageCount);
     } catch {
       setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: 'failed' } : d));
       await dbApi.updateDocumentStatus(docId, 'failed', 0);
@@ -381,8 +394,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Re-run with current (improved) pipeline
       const result = await processDocumentIngestion(activeWorkspace.id, docId, doc.filename, fileData, doc.mimeType);
 
-      setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: result.status, chunkCount: result.chunkCount } : d));
-      await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount);
+      setDocuments(prev => prev.map(d => d.id === docId ? { 
+        ...d, 
+        status: result.status, 
+        chunkCount: result.chunkCount,
+        pages: result.pageCount || d.pages
+      } : d));
+      await dbApi.updateDocumentStatus(docId, result.status, result.chunkCount, result.pageCount);
     } catch (err: any) {
       console.error('[reprocessDocument] Error:', err);
       setDocuments(prev => prev.map(d => d.id === docId ? { ...d, status: 'failed' } : d));
@@ -440,6 +458,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMessages(msgs);
   };
 
+  const clearRecentQueries = async () => {
+    await dbApi.clearRecentQueries();
+    setRecentQueries([]);
+  };
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || !activeWorkspace) return;
 
@@ -460,6 +483,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const autoTitle = text.length > 32 ? text.slice(0, 32) + '...' : text;
       renameChatSession(chatSessionRef.current!, autoTitle);
     }
+
+    // Capture chat history before adding the new user message
+    const historyForContext = messages.map(m => ({ role: m.role, content: m.content }));
 
     const userMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'user', text);
     const userMsg: ChatMessage = {
@@ -487,12 +513,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setIsSending(true);
     try {
-      // Pass selectedDocumentIds as hard filter — empty array means search all docs
-      // topK=6: retrieve 6 best chunks to give LLM enough context across all sections
+      // If workspace has multiple ready documents and user has not scoped to a single document, prompt user to select a document
+      const readyWorkspaceDocs = documents.filter(d => d.workspaceId === activeWorkspace.id && d.status === 'ready');
+      if (readyWorkspaceDocs.length > 1 && selectedDocumentIds.length !== 1) {
+        const promptScopeMsg = `⚠️ **Multiple Documents Detected**\n\nYour workspace currently contains **${readyWorkspaceDocs.length} documents**. To ensure accurate, dedicated answers and prevent mixing information across different files, please **select a specific document** from the **Query Scope** panel on the left sidebar before asking your question.`;
+
+        const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', promptScopeMsg, []);
+        setMessages(prev => [...prev, {
+          id: assistantMsgId || `msg-${Date.now() + 1}`,
+          role: 'assistant',
+          content: promptScopeMsg,
+          sources: [],
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+        setIsSending(false);
+        return;
+      }
+
+      // Contextualize query with chat history to resolve referential terms (pronouns/short follow-ups)
+      const searchQuery = contextualizeQuery(text, historyForContext);
+
+      // Pass selectedDocumentIds as hard filter
       const sources = await performHybridSearch(
         activeWorkspace.id,
-        text,
-        6,
+        searchQuery,
+        10,
         60,
         selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined
       );
@@ -519,7 +564,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         score: s.rerankScore || s.score,
       }));
 
-      const llmResult = await generateGroundedResponse(text, contextItems);
+      const llmResult = await generateGroundedResponse(text, contextItems, historyForContext, isExpertMode);
       const answerText = llmResult.answer;
 
       const assistantMsgId = await dbApi.saveMessage(chatSessionRef.current!, 'assistant', answerText, sources);
@@ -555,7 +600,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       currentUser, userRole, setUserRole,
       documents, uploadDocument, deleteDocument, reprocessDocument,
       chatSessions: activeWorkspace ? chatSessions.filter(s => s.workspaceId === activeWorkspace.id) : [],
-      activeSessionId, messages, recentQueries, sendMessage, isSending,
+      activeSessionId, messages, recentQueries, clearRecentQueries, sendMessage, isSending,
+      isExpertMode, setIsExpertMode,
       createNewChatSession, renameChatSession, deleteChatSession, switchChatSession,
       selectedDocumentIds, setSelectedDocumentIds,
       activeScreen, setActiveScreen, activeTab, setActiveTab

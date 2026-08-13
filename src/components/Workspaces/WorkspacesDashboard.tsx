@@ -12,7 +12,8 @@ import {
   LayoutGrid,
   Sparkles,
   Upload,
-  Brain
+  Brain,
+  Trash2
 } from 'lucide-react';
 
 // ── Stat Card ────────────────────────────────────────────────────────────
@@ -227,6 +228,7 @@ export const WorkspacesDashboard: React.FC = () => {
     documents, 
     members, 
     recentQueries,
+    clearRecentQueries,
     userRole,
     currentUser
   } = useApp();
@@ -416,9 +418,27 @@ export const WorkspacesDashboard: React.FC = () => {
 
       {/* Recent Queries Section */}
       <div style={{ marginTop: 40 }}>
-        <h2 className="font-serif" style={{ fontSize: 18, fontWeight: 400, color: '#16161a', marginBottom: 16 }}>
-          Recent queries
-        </h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h2 className="font-serif" style={{ fontSize: 18, fontWeight: 400, color: '#16161a', margin: 0 }}>
+            Recent queries
+          </h2>
+          {recentQueries.length > 0 && (
+            <button
+              onClick={clearRecentQueries}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: '#fff1f2', color: '#e11d48', border: '1px solid #fecdd3', borderRadius: 8,
+                padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#ffe4e6'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff1f2'}
+            >
+              <Trash2 size={13} />
+              Clear History
+            </button>
+          )}
+        </div>
 
         <div style={{ background: '#ffffff', border: '1px solid #eaeaea', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.02)' }}>
           {recentQueries.length === 0 ? (

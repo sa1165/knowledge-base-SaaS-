@@ -57,7 +57,37 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
 }
 
 // ── System Prompt Builder ───────────────────────────────────────────────
-function buildSystemPrompt(): string {
+function buildSystemPrompt(isExpertMode = false): string {
+  if (isExpertMode) {
+    return `You are Docly AI operating in EXPERT DEEP THINK MODE (inspired by DeepSeek R1 / Deep Think).
+Your goal is to provide an EXHAUSTIVE, HIGHLY DETAILED, MASTERCLASS-LEVEL analytical explanation for the user query strictly grounded in the document context.
+
+EXPERT DEEP THINK INSTRUCTIONS:
+1. DEEP REASONING & COMPREHENSIVE COVERAGE:
+   - Do NOT give brief or summarized answers.
+   - Deliver a deep, comprehensive dive into the topic. Connect concepts, explain underlying mechanics, architectural principles, theoretical foundations, step-by-step breakdowns, edge cases, and practical takeaways.
+2. EXHAUSTIVE STRUCTURED FORMATTING:
+   - Use clear ### Headings for distinct sub-sections.
+   - Use detailed multi-paragraph prose explanations for each concept.
+   - Use bullet points, code blocks, or structured lists where appropriate for technical precision.
+   - Use **bold** for critical terms, dates, specs, and names.
+   - Use > blockquotes for key takeaways, masterclass insights, or essential notes.
+3. GROUNDING & CITATIONS:
+   - All facts and details MUST be grounded in the provided DOCUMENT CONTEXT.
+   - Always append [Source N] inline citations after every factual claim or bullet point.
+4. CONTINUITY:
+   - Resolve any referential terms (pronouns like "its", "this", "that") using recent chat history.
+
+SUGGESTED FOLLOW-UP QUESTIONS:
+At the very end of your response, ALWAYS append 3 deep-dive, analytical follow-up questions formatted as:
+
+---
+**Suggested Follow-up Questions:**
+- 💡 [First deep analytical follow-up question]
+- 💡 [Second deep analytical follow-up question]
+- 💡 [Third deep analytical follow-up question]`;
+  }
+
   return `You are Docly AI — an expert document analyst and knowledge assistant. Your job is to read the provided document context and deliver intelligent, insightful, well-written answers — not to copy or paraphrase the document verbatim.
 
 FUNDAMENTAL APPROACH:
@@ -94,36 +124,95 @@ Format them exactly as follows at the bottom of your output:
 - 💡 [Third relevant follow-up question based on the document]`;
 }
 
-function buildUserMessage(query: string, contexts: ContextItem[]): string {
+export interface HistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * Contextualizes a user's follow-up query by resolving referential pronouns
+ * (e.g., "its", "this", "that", "the course", "syllabus") using recent chat history.
+ */
+export function contextualizeQuery(latestQuery: string, history: HistoryItem[] = []): string {
+  if (!history || history.length === 0) return latestQuery;
+
+  const trimmed = latestQuery.trim();
+  const lower = trimmed.toLowerCase();
+
+  // Words or patterns indicating follow-up/referential queries
+  const referentialPattern = /\b(it|its|this|that|these|those|they|them|he|she|his|her|their|the course|the unit|the subject|the document|syllabus|units|modules|chapter|more|explain|detail|list|what about|how about|tell me more)\b/i;
+  const isShortQuery = trimmed.split(/\s+/).length <= 8;
+
+  if (referentialPattern.test(lower) || isShortQuery) {
+    const userMsgs = history.filter(m => m.role === 'user');
+    const assistantMsgs = history.filter(m => m.role === 'assistant');
+
+    // Get last user query topic
+    const lastUserQuery = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content.trim() : '';
+
+    // Get last assistant main topic heading (if any)
+    let lastTopicHeading = '';
+    if (assistantMsgs.length > 0) {
+      const lastAns = assistantMsgs[assistantMsgs.length - 1].content;
+      // Extract title from assistant answer e.g. "Introduction to Machine Learning for All"
+      const titleMatch = lastAns.match(/(?:^|\n)(?:#+|\*\*)\s*([^\n*#]{4,80})/);
+      if (titleMatch && titleMatch[1]) {
+        lastTopicHeading = titleMatch[1].trim();
+      }
+    }
+
+    const contextPrefix = [lastUserQuery, lastTopicHeading].filter(Boolean).join(' ');
+    if (contextPrefix) {
+      return `${contextPrefix} ${latestQuery}`;
+    }
+  }
+
+  return latestQuery;
+}
+
+function buildUserMessage(query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): string {
+  let historySection = '';
+  if (history.length > 0) {
+    const recentHistory = history.slice(-6);
+    historySection = `RECENT CONVERSATION HISTORY:\n` +
+      recentHistory.map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content.replace(/\n+/g, ' ').slice(0, 350)}`).join('\n') +
+      `\n\n`;
+  }
+
   if (contexts.length === 0) {
-    return `USER QUERY: ${query}\n\nDOCUMENT CONTEXT: No relevant context found in workspace documents.`;
+    return `${historySection}USER QUERY: ${query}\n\nDOCUMENT CONTEXT: No relevant context found in workspace documents.`;
   }
 
   const formattedContext = contexts.map((c, idx) => {
     // Guard: truncate content per chunk to stay within token budget
-    const safeContent = c.content.length > MAX_CONTENT_CHARS_PER_CHUNK
-      ? c.content.slice(0, MAX_CONTENT_CHARS_PER_CHUNK) + '...'
+    const safeContent = c.content.length > (isExpertMode ? 2500 : MAX_CONTENT_CHARS_PER_CHUNK)
+      ? c.content.slice(0, isExpertMode ? 2500 : MAX_CONTENT_CHARS_PER_CHUNK) + '...'
       : c.content;
 
     return `[Source ${idx + 1}] Document: "${c.documentName}"${c.pageNumber ? ` (Page ${c.pageNumber})` : ''}\nContent:\n${safeContent}`;
   }).join('\n\n---\n\n');
 
-  return `DOCUMENT CONTEXT (your knowledge base — use it to synthesize an expert answer):
-${formattedContext}
-
-USER QUERY: ${query}
-
-Using the document context above as your factual foundation, write a comprehensive, intelligent, well-structured answer in your own words.
+  const modeInstruction = isExpertMode
+    ? `EXPERT DEEP THINK INSTRUCTIONS: Using the document context above and recent conversation history, write an EXHAUSTIVE, HIGHLY DETAILED, MASTERCLASS-LEVEL analytical response. Provide in-depth explanations, clear headings, multi-paragraph conceptual breakdowns, and thorough analysis for every point.`
+    : `Using the document context above and the recent conversation history as your reference, write a comprehensive, intelligent, well-structured answer in your own words.
 Do NOT copy the text verbatim from the document. Instead:
 - Synthesize and explain the information like an expert analyst would.
+- Maintain context continuity: resolve referential terms (such as "its", "this", "that") according to the recent conversation topic.
 - Add professional framing, context, and insight around the facts.
 - Connect related ideas where relevant.
 - Include [Source N] inline citations for every fact you use.
 - Format your answer for clarity and impact using headings, bold, and appropriate structure.`;
+
+  return `${historySection}DOCUMENT CONTEXT (your knowledge base — use it to synthesize an expert answer):
+${formattedContext}
+
+USER QUERY: ${query}
+
+${modeInstruction}`;
 }
 
 // ── Call Groq API with specific key ──────────────────────────────────────────
-async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[]): Promise<{ answer: string; model: string }> {
+async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): Promise<{ answer: string; model: string }> {
   const model = 'llama-3.3-70b-versatile';
   const response = await fetchWithTimeout(
     'https://api.groq.com/openai/v1/chat/completions',
@@ -136,11 +225,11 @@ async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: buildSystemPrompt() },
-          { role: 'user', content: buildUserMessage(query, contexts) },
+          { role: 'system', content: buildSystemPrompt(isExpertMode) },
+          { role: 'user', content: buildUserMessage(query, contexts, history, isExpertMode) },
         ],
-        temperature: 0.1,
-        max_tokens: 1024,
+        temperature: isExpertMode ? 0.2 : 0.1,
+        max_tokens: isExpertMode ? 3500 : 1024,
       }),
     },
     REQUEST_TIMEOUT_MS
@@ -158,9 +247,9 @@ async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[
 }
 
 // ── Call Gemini API Fallback ──────────────────────────────────────────────────
-async function callGeminiAPI(apiKey: string, query: string, contexts: ContextItem[]): Promise<{ answer: string; model: string }> {
+async function callGeminiAPI(apiKey: string, query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): Promise<{ answer: string; model: string }> {
   const model = 'gemini-1.5-flash';
-  const prompt = `${buildSystemPrompt()}\n\n${buildUserMessage(query, contexts)}`;
+  const prompt = `${buildSystemPrompt(isExpertMode)}\n\n${buildUserMessage(query, contexts, history, isExpertMode)}`;
 
   const response = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -170,8 +259,8 @@ async function callGeminiAPI(apiKey: string, query: string, contexts: ContextIte
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
+          temperature: isExpertMode ? 0.2 : 0.1,
+          maxOutputTokens: isExpertMode ? 3500 : 1024,
         }
       }),
     },
@@ -211,7 +300,7 @@ function generateLocalGroundedAnswer(query: string, contexts: ContextItem[]): { 
 }
 
 // ── Master Generate Function with 3-Key Failover ─────────────────────────────
-export async function generateGroundedResponse(query: string, contexts: ContextItem[]): Promise<LLMResponse> {
+export async function generateGroundedResponse(query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): Promise<LLMResponse> {
   const startTime = Date.now();
   const GROQ_KEYS = getGroqKeys();
   const GEMINI_API_KEY = getGeminiKey();
@@ -230,8 +319,8 @@ export async function generateGroundedResponse(query: string, contexts: ContextI
       const providerLabel = `groq_key_${keyIdx + 1}` as LLMResponse['providerUsed'];
 
       try {
-        console.log(`[RAG Engine] Attempting Groq Key ${keyIdx + 1}...`);
-        const { answer, model } = await callGroqAPI(apiKey, query, contexts);
+        console.log(`[RAG Engine] Attempting Groq Key ${keyIdx + 1} (Expert Mode: ${isExpertMode})...`);
+        const { answer, model } = await callGroqAPI(apiKey, query, contexts, history, isExpertMode);
         currentGroqKeyIndex = (keyIdx + 1) % GROQ_KEYS.length;
         return { answer, providerUsed: providerLabel, modelUsed: model, latencyMs: Date.now() - startTime };
       } catch (err: any) {
@@ -244,7 +333,7 @@ export async function generateGroundedResponse(query: string, contexts: ContextI
   if (GEMINI_API_KEY) {
     try {
       console.log('[RAG Engine] All Groq keys exhausted → Gemini Fallback...');
-      const { answer, model } = await callGeminiAPI(GEMINI_API_KEY, query, contexts);
+      const { answer, model } = await callGeminiAPI(GEMINI_API_KEY, query, contexts, history, isExpertMode);
       return { answer, providerUsed: 'gemini_fallback', modelUsed: model, latencyMs: Date.now() - startTime };
     } catch (err: any) {
       console.warn('[RAG Engine] Gemini Fallback failed:', err?.message);

@@ -226,7 +226,7 @@ function computeRerankScore(query: string, content: string, rrfScore: number): n
 export async function performHybridSearch(
   workspaceId: string,
   query: string,
-  topK = 4,
+  topK = 10,
   rrfK = 60,
   documentFilter?: string[] // Optional: restrict search to specific document IDs
 ): Promise<RetrievalResult[]> {
@@ -240,9 +240,24 @@ export async function performHybridSearch(
     if (workspaceChunks.length === 0) return [];
   }
 
+  // ── Full-Document Coverage Guard ─────────────────────────────────────────────
+  // If total target chunks <= 25, return ALL chunks so the AI has 100% complete document mastery!
+  if (workspaceChunks.length <= 25) {
+    return workspaceChunks.map((chunk, idx) => ({
+      chunkId: chunk.id,
+      documentId: chunk.documentId,
+      documentName: chunk.documentName,
+      content: chunk.content,
+      pageNumber: chunk.pageNumber,
+      score: 1.0,
+      vectorRank: idx + 1,
+      bm25Rank: idx + 1,
+      rerankScore: 1.0,
+    }));
+  }
+
   // Internal candidate pool — retrieve 3x topK then rerank to topK
-  // This dramatically improves recall for short / ambiguous queries
-  const candidatePool = Math.max(topK * 3, 12);
+  const candidatePool = Math.max(topK * 3, 15);
 
   // 1. Vector Search (semantic)
   const queryEmbedding = await generateEmbedding(query);
@@ -283,7 +298,7 @@ export async function performHybridSearch(
     .map(item => ({ ...item, rerankScore: computeRerankScore(query, item.chunk.content, item.score) }))
     .sort((a, b) => b.rerankScore - a.rerankScore);
 
-  return candidates.slice(0, topK).map(item => ({
+  const topResults = candidates.slice(0, topK).map(item => ({
     chunkId: item.chunk.id,
     documentId: item.chunk.documentId,
     documentName: item.chunk.documentName,
@@ -294,4 +309,22 @@ export async function performHybridSearch(
     bm25Rank: item.bm25Rank,
     rerankScore: item.rerankScore,
   }));
+
+  // Force-include Page 1 metadata/title chunk if not already present
+  const page1Chunk = workspaceChunks.find(c => c.pageNumber === 1 || c.id.endsWith('-0'));
+  if (page1Chunk && !topResults.some(r => r.chunkId === page1Chunk.id)) {
+    topResults.unshift({
+      chunkId: page1Chunk.id,
+      documentId: page1Chunk.documentId,
+      documentName: page1Chunk.documentName,
+      content: page1Chunk.content,
+      pageNumber: page1Chunk.pageNumber,
+      score: 1.0,
+      vectorRank: 1,
+      bm25Rank: 1,
+      rerankScore: 1.0,
+    });
+  }
+
+  return topResults;
 }

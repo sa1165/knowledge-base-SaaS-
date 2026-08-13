@@ -8,6 +8,7 @@ export interface IngestionResult {
   documentId: string;
   filename: string;
   chunkCount: number;
+  pageCount: number;
   status: 'ready' | 'failed';
   errorMessage?: string;
 }
@@ -29,6 +30,7 @@ export async function processDocumentIngestion(
     if (!parsed.text || parsed.text.trim().length === 0) {
       throw new Error('Extracted document text is empty.');
     }
+    const pageCount = parsed.pageCount || Math.max(1, Math.ceil(parsed.text.length / 2500));
 
     // 3. Chunk text into semantically-bounded blocks
     const chunks = chunkText(parsed.text, 250, 60);
@@ -72,6 +74,7 @@ export async function processDocumentIngestion(
       documentId,
       filename,
       chunkCount: chunks.length,
+      pageCount,
       status: 'ready'
     };
   } catch (err: any) {
@@ -80,6 +83,7 @@ export async function processDocumentIngestion(
       documentId,
       filename,
       chunkCount: 0,
+      pageCount: 1,
       status: 'failed',
       errorMessage: err?.message || 'Unknown processing error'
     };
