@@ -435,16 +435,8 @@ const InnerDashboard: React.FC = () => {
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: '#16161a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {displayName}
                 </div>
-                <div
-                  style={{
-                    fontSize: 10, fontWeight: 700, color: userRole === 'owner' ? '#16161a' : userRole === 'editor' ? '#2563eb' : '#6b7280',
-                    background: userRole === 'owner' ? '#f4f4f3' : userRole === 'editor' ? '#eff6ff' : '#f3f4f6',
-                    border: '1px solid #e5e5e3', borderRadius: 4, padding: '1px 6px',
-                    textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'monospace',
-                    display: 'inline-block', marginTop: 2
-                  }}
-                >
-                  {userRole === 'owner' ? '👑 Owner' : `🤝 ${userRole}`}
+                <div style={{ fontSize: 11, color: '#8e8e93', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentUser.email || user?.email || ''}
                 </div>
               </div>
             )}
