@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, UserRole } from '../../context/AppContext';
-import { ChevronDown, X, UserPlus, Trash2, Key, Webhook, CheckCircle2, Settings, AlertTriangle, Loader2, Shield } from 'lucide-react';
+import { ChevronDown, X, UserPlus, Trash2, Key, Webhook, CheckCircle2, Settings, AlertTriangle, Loader2, Shield, Copy, Link } from 'lucide-react';
 
 type SettingsTab = 'general' | 'members' | 'integrations' | 'danger';
 
@@ -640,6 +640,34 @@ export const WorkspaceSettings: React.FC = () => {
                     {isInviting
                       ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Inviting...</>
                       : <><UserPlus size={15} /> Send invite</>}
+                  </button>
+                </div>
+
+                {/* Direct Shareable Invite Link Card */}
+                <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px dashed #e5e5e3', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Link size={15} color="#2563eb" />
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#16161a' }}>Direct Workspace Invite Link</div>
+                      <div style={{ fontSize: 11, color: '#8e8e93', fontFamily: 'monospace' }}>
+                        {`${window.location.origin}/auth?invite=${activeWorkspace.id}`}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/auth?invite=${activeWorkspace.id}`);
+                      showToast('Copied workspace invite link to clipboard!', 'success');
+                    }}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6,
+                      padding: '6px 12px', fontSize: 12, fontWeight: 600, color: '#2563eb',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Copy size={13} /> Copy Link
                   </button>
                 </div>
               </form>

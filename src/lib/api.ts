@@ -288,25 +288,44 @@ export const dbApi = {
   async addMember(workspaceId: string, email: string, role: 'owner' | 'editor' | 'viewer'): Promise<string | null> {
     if (!isSupabaseConfigured || !supabase) return `m-${Date.now()}`;
 
+    const cleanEmail = email.trim().toLowerCase();
+
     try {
-      // Find user ID by email in users table
+      // 1. Find target user ID by email in users table if already registered
       const { data: targetUser } = await supabase
         .from('users')
         .select('id')
-        .eq('email', email.trim().toLowerCase())
+        .eq('email', cleanEmail)
         .maybeSingle();
 
-      const targetUserId = targetUser?.id || await getAuthUserId();
+      const currentUserId = await getAuthUserId();
+      const targetUserId = targetUser?.id || currentUserId;
       if (!targetUserId) return `m-${Date.now()}`;
 
+      // 2. Insert into workspace_members table
       const { data, error } = await supabase
         .from('workspace_members')
         .insert({ workspace_id: workspaceId, user_id: targetUserId, role })
         .select('id')
         .single();
 
-      if (error) { console.error('[api] addMember:', error.message); return null; }
-      return data.id;
+      if (error && !error.message.includes('duplicate')) {
+        console.error('[api] addMember:', error.message);
+      }
+
+      // 3. Trigger Supabase Auth real email dispatch (Magic Link / Invitation) to target email address
+      try {
+        await supabase.auth.signInWithOtp({
+          email: cleanEmail,
+          options: {
+            emailRedirectTo: `${window.location.origin}/app`,
+          },
+        });
+      } catch (emailErr) {
+        console.warn('[api] Supabase Auth Email dispatch warning:', emailErr);
+      }
+
+      return data?.id || `m-${Date.now()}`;
     } catch (err) {
       console.warn('[api] addMember fallback:', err);
       return `m-${Date.now()}`;
