@@ -367,7 +367,7 @@ export const WorkspacesDashboard: React.FC = () => {
       </div>
 
       {/* 4 Real-time Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16, marginBottom: 44 }}>
+      <div className="grid-responsive-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16, marginBottom: 44 }}>
         <StatCard 
           icon={<Folder size={18} />} 
           value={workspaces.length} 
@@ -417,7 +417,7 @@ export const WorkspacesDashboard: React.FC = () => {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'monospace', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
           <Folder size={14} color="#8e8e93" /> Personal Workspaces (Created by You)
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
+        <div className="grid-responsive-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 18 }}>
           {filteredWorkspaces.filter(w => w.role === 'owner').map(ws => (
             <WorkspaceCard 
               key={ws.id} 

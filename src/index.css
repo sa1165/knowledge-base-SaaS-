@@ -419,3 +419,51 @@
   border: 1px solid rgba(255,255,255,0.15);
   transform: rotateY(180deg);
 }
+
+/* ─── Mobile Responsiveness & Touch Optimization ─────────── */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+
+  /* Responsive Grid layouts */
+  .grid-responsive-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .grid-responsive-cards {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  /* Chat window mobile adjustments */
+  .chat-sidebar-mobile {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 90 !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2) !important;
+  }
+
+  /* Mobile full width cards and padded layouts */
+  .mobile-padded {
+    padding: 16px 14px !important;
+  }
+
+  .mobile-hide {
+    display: none !important;
+  }
+
+  .mobile-show-flex {
+    display: flex !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid-responsive-stats {
+    grid-template-columns: 1fr !important;
+  }
+}
+

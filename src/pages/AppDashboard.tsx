@@ -26,6 +26,7 @@ import {
   X,
   Mail,
   CheckCircle2,
+  Menu,
 } from 'lucide-react';
 
 // ── Nav Items (matching Sidebar in uploaded images) ───────────────────────
@@ -66,6 +67,13 @@ const InnerDashboard: React.FC = () => {
   // Separate personal vs shared workspaces
   const personalWorkspaces = workspaces.filter(w => w.role === 'owner');
   const sharedWorkspaces = workspaces.filter(w => w.role !== 'owner');
+
+  // Auto collapse sidebar on initial mobile load
+  useEffect(() => {
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
