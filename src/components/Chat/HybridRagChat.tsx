@@ -313,7 +313,22 @@ export const HybridRagChat: React.FC = () => {
       >
         
         {/* Top Action Bar */}
-        <div style={{ padding: '16px 14px 12px', borderBottom: '1px solid #f4f4f3', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid #f4f4f3', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Mobile Hide Sidebar Row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }} className="flex md:hidden">
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#16161a' }}>Chat History</span>
+            <button
+              onClick={() => setShowMobileHistory(false)}
+              style={{
+                background: '#f4f4f3', border: '1px solid #eaeaea', borderRadius: 6,
+                padding: '4px 10px', fontSize: 11.5, fontWeight: 600, color: '#5e5e62',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+              }}
+            >
+              <X size={14} /> Hide
+            </button>
+          </div>
+
           <button
             onClick={() => { createNewChatSession(); setShowMobileHistory(false); }}
             style={{
