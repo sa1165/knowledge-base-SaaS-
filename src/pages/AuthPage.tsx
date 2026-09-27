@@ -91,11 +91,11 @@ export const AuthPage: React.FC = () => {
         borderRight: '1px solid #28282c',
         padding: '48px',
         color: '#ffffff',
-        display: 'flex',
+        display: 'none',
         flexDirection: 'column',
         justifyContent: 'space-between',
         position: 'relative'
-      }} className="hidden lg:flex">
+      }} className="auth-left-pane">
         
         {/* Top: Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/')}>

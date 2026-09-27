@@ -461,9 +461,16 @@
   }
 }
 
+@media (min-width: 1024px) {
+  .auth-left-pane {
+    display: flex !important;
+  }
+}
+
 @media (max-width: 480px) {
   .grid-responsive-stats {
     grid-template-columns: 1fr !important;
   }
 }
+
 

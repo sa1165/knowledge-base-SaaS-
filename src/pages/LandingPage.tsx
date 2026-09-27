@@ -130,24 +130,24 @@ export const LandingPage: React.FC = () => {
         <div style={{ maxWidth: 1200, margin: '0 auto', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           
           {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => navigate('/')}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flexShrink: 0 }} onClick={() => navigate('/')}>
             <div style={{
-              width: 32, height: 32, borderRadius: 8,
+              width: 30, height: 30, borderRadius: 8,
               background: '#16161a',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
             }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect width="18" height="18" x="3" y="3" rx="2" />
                 <path d="M7 7h10M7 12h10M7 17h10" />
               </svg>
             </div>
-            <span className="font-serif" style={{ fontWeight: 700, fontSize: 20, color: '#16161a', letterSpacing: '-0.01em' }}>
+            <span className="font-serif" style={{ fontWeight: 700, fontSize: 19, color: '#16161a', letterSpacing: '-0.01em' }}>
               Docly
             </span>
           </div>
 
           {/* Navigation Links */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 32 }} className="hidden md:flex">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }} className="hidden md:flex">
             <a href="#features" style={{ color: '#5e5e62', textDecoration: 'none', fontSize: 14, fontWeight: 500, transition: 'color 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#16161a'} onMouseOut={(e) => e.currentTarget.style.color = '#5e5e62'}>Features</a>
             <a href="#how-it-works" style={{ color: '#5e5e62', textDecoration: 'none', fontSize: 14, fontWeight: 500, transition: 'color 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#16161a'} onMouseOut={(e) => e.currentTarget.style.color = '#5e5e62'}>How it works</a>
             <button onClick={() => navigate('/pricing')} style={{ background: 'none', border: 'none', color: '#5e5e62', cursor: 'pointer', fontSize: 14, fontWeight: 500, transition: 'color 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#16161a'} onMouseOut={(e) => e.currentTarget.style.color = '#5e5e62'}>Pricing</button>
@@ -155,7 +155,7 @@ export const LandingPage: React.FC = () => {
           </div>
 
           {/* Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             <button onClick={() => navigate('/auth')} style={{
               background: 'none', border: 'none', color: '#16161a', cursor: 'pointer', fontSize: 14, fontWeight: 600
             }}>

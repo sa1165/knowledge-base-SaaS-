@@ -172,6 +172,7 @@ export const HybridRagChat: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<RetrievalResult | null>(null);
   const [allSources, setAllSources] = useState<RetrievalResult[]>([]);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [showMobileHistory, setShowMobileHistory] = useState(false);
 
   // ── Typewriter streaming — only fires for messages the user just sent ──────
   // Rule: historical messages (from DB) render instantly. New live messages animate.
@@ -303,15 +304,18 @@ export const HybridRagChat: React.FC = () => {
     <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#fcfcfb', height: '100%' }}>
 
       {/* ── LEFT: ChatGPT-Style Chat Sessions Sidebar ────────────────────────── */}
-      <div style={{
-        width: 250, flexShrink: 0, background: '#ffffff', borderRight: '1px solid #eaeaea',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%'
-      }}>
+      <div
+        className={showMobileHistory ? 'chat-sidebar-mobile' : 'hidden md:flex'}
+        style={{
+          width: 250, flexShrink: 0, background: '#ffffff', borderRight: '1px solid #eaeaea',
+          flexDirection: 'column', overflow: 'hidden', height: '100%'
+        }}
+      >
         
         {/* Top Action Bar */}
         <div style={{ padding: '16px 14px 12px', borderBottom: '1px solid #f4f4f3', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button
-            onClick={createNewChatSession}
+            onClick={() => { createNewChatSession(); setShowMobileHistory(false); }}
             style={{
               width: '100%', background: '#16161a', color: '#ffffff', border: 'none', borderRadius: 8,
               padding: '10px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -357,7 +361,12 @@ export const HybridRagChat: React.FC = () => {
               return (
                 <div
                   key={s.id}
-                  onClick={() => !isEditing && switchChatSession(s.id)}
+                  onClick={() => {
+                    if (!isEditing) {
+                      switchChatSession(s.id);
+                      setShowMobileHistory(false);
+                    }
+                  }}
                   style={{
                     padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
                     background: isActive ? '#eff6ff' : 'transparent',
@@ -488,11 +497,25 @@ export const HybridRagChat: React.FC = () => {
 
         {/* Top Header Bar */}
         <div style={{
-          padding: '12px 24px', background: '#ffffff', borderBottom: '1px solid #eaeaea',
+          padding: '12px 16px', background: '#ffffff', borderBottom: '1px solid #eaeaea',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: isExpertMode ? '#4f46e5' : '#16161a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }}>
+            {/* Mobile History Toggle Button */}
+            <button
+              onClick={() => setShowMobileHistory(!showMobileHistory)}
+              className="flex md:hidden"
+              style={{
+                background: '#f4f4f3', border: '1px solid #eaeaea', borderRadius: 8,
+                padding: '6px 10px', fontSize: 12, fontWeight: 600, color: '#16161a',
+                cursor: 'pointer', alignItems: 'center', gap: 6
+              }}
+            >
+              <History size={14} />
+              <span>Chats</span>
+            </button>
+
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: isExpertMode ? '#4f46e5' : '#16161a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', flexShrink: 0 }}>
               {isExpertMode ? <Brain size={15} /> : <Sparkles size={14} />}
             </div>
             <div>
@@ -504,7 +527,7 @@ export const HybridRagChat: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: '#8e8e93' }}>
+              <div style={{ fontSize: 11, color: '#8e8e93' }} className="hidden sm:block">
                 {isExpertMode ? 'Exhaustive analytical explanations · DeepSeek-style reasoning · Grounded RAG' : 'Strict grounding · Zero hallucinations · Fast Typewriter Stream'}
               </div>
             </div>
