@@ -572,6 +572,14 @@ export const dbApi = {
     if (error) console.error('[api] removeMember:', error.message);
   },
 
+  async leaveWorkspace(workspaceId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    const userId = await getAuthUserId();
+    if (!userId) return;
+    const { error } = await supabase.from('workspace_members').delete().eq('workspace_id', workspaceId).eq('user_id', userId);
+    if (error) console.error('[api] leaveWorkspace:', error.message);
+  },
+
   // ══════════════════════════════════════════════════════════════════
   // CHAT SESSIONS + MESSAGES
   // ══════════════════════════════════════════════════════════════════
@@ -581,12 +589,27 @@ export const dbApi = {
     const userId = await getAuthUserId();
     if (!userId) return [];
 
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select('*')
-      .eq('workspace_id', workspaceId)
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
+    // Check if user is owner of this workspace
+    const { data: ws } = await supabase.from('workspaces').select('owner_id').eq('id', workspaceId).maybeSingle();
+    const isOwner = ws ? ws.owner_id === userId : true;
+
+    // Check if workspace has multiple team members (shared workspace)
+    const { count: memberCount } = await supabase
+      .from('workspace_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
+
+    const isShared = !isOwner || (memberCount && memberCount > 0);
+
+    let query = supabase.from('chat_sessions').select('*').eq('workspace_id', workspaceId);
+
+    // If it's the user's personal workspace, isolate chats to that user only.
+    // If it's a shared workspace, expose shared chat history to all workspace members.
+    if (!isShared) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data, error } = await query.order('updated_at', { ascending: false });
 
     if (error) { console.warn('[api] getChatSessions:', error.message); return []; }
 

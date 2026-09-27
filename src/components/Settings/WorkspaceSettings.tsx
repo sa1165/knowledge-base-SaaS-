@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, UserRole } from '../../context/AppContext';
-import { ChevronDown, X, UserPlus, Trash2, Key, Webhook, CheckCircle2, Settings, AlertTriangle, Loader2, Shield, Copy, Link } from 'lucide-react';
+import { ChevronDown, X, UserPlus, Trash2, Key, Webhook, CheckCircle2, Settings, AlertTriangle, Loader2, Shield, Copy, Link, LogOut } from 'lucide-react';
 
 type SettingsTab = 'general' | 'members' | 'integrations' | 'danger';
 
@@ -106,6 +106,7 @@ export const WorkspaceSettings: React.FC = () => {
     addMember,
     updateMemberRole,
     removeMember,
+    leaveWorkspace,
     userRole,
     setActiveScreen,
     documents,
@@ -127,8 +128,10 @@ export const WorkspaceSettings: React.FC = () => {
   // Confirmation dialogs
   const [confirmDeleteDocs, setConfirmDeleteDocs] = useState(false);
   const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
+  const [confirmLeaveWorkspace, setConfirmLeaveWorkspace] = useState(false);
   const [isDeletingDocs, setIsDeletingDocs] = useState(false);
   const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
+  const [isLeavingWorkspace, setIsLeavingWorkspace] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -270,6 +273,20 @@ export const WorkspaceSettings: React.FC = () => {
     }
   };
 
+  const handleLeaveWorkspace = async () => {
+    setIsLeavingWorkspace(true);
+    try {
+      await leaveWorkspace(activeWorkspace.id);
+      setConfirmLeaveWorkspace(false);
+      setActiveScreen('workspaces');
+      showToast(`You have left "${activeWorkspace.name}".`, 'success');
+    } catch {
+      showToast('Failed to leave workspace. Try again.', 'error');
+    } finally {
+      setIsLeavingWorkspace(false);
+    }
+  };
+
   return (
     <>
       {/* Keyframe injection */}
@@ -298,6 +315,17 @@ export const WorkspaceSettings: React.FC = () => {
           onConfirm={handleDeleteWorkspace}
           onCancel={() => setConfirmDeleteWorkspace(false)}
           isLoading={isDeletingWorkspace}
+        />
+      )}
+
+      {confirmLeaveWorkspace && (
+        <ConfirmDialog
+          title="Leave workspace?"
+          message={`Are you sure you want to leave "${activeWorkspace.name}"? You will lose access to shared documents and chat sessions in this workspace.`}
+          confirmLabel="Leave workspace"
+          onConfirm={handleLeaveWorkspace}
+          onCancel={() => setConfirmLeaveWorkspace(false)}
+          isLoading={isLeavingWorkspace}
         />
       )}
 
@@ -785,6 +813,41 @@ export const WorkspaceSettings: React.FC = () => {
                 Delete workspace
               </button>
             </div>
+
+            {/* Card 3: Leave workspace (Exclusively for joinees/non-owners) */}
+            {!isOwner && (
+              <div style={{ background: '#fff7ed', border: '1.5px solid #fdba74', borderRadius: 16, padding: '28px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 10, background: '#ffedd5',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                  }}>
+                    <LogOut size={18} color="#c2410c" />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#9a3412', margin: '0 0 6px 0' }}>
+                      Leave workspace
+                    </h3>
+                    <p style={{ fontSize: 13, color: '#9a3412', opacity: 0.85, margin: 0, lineHeight: 1.5 }}>
+                      Removes yourself from <strong>"{activeWorkspace.name}"</strong>. You will lose access to all shared documents and team chat sessions in this workspace.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setConfirmLeaveWorkspace(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    background: '#c2410c', color: '#ffffff',
+                    border: 'none', borderRadius: 8, padding: '11px 20px',
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(194,65,12,0.25)', transition: 'all 0.15s'
+                  }}
+                >
+                  <LogOut size={15} />
+                  Leave workspace
+                </button>
+              </div>
+            )}
 
           </div>
         )}

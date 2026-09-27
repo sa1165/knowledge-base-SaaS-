@@ -97,6 +97,7 @@ interface AppContextType {
   addMember: (name: string, email: string, role: UserRole) => Promise<void>;
   updateMemberRole: (memberId: string, role: UserRole) => Promise<void>;
   removeMember: (memberId: string) => Promise<void>;
+  leaveWorkspace: (workspaceId: string) => Promise<void>;
 
   // User / Role
   currentUser: { name: string; email: string };
@@ -384,6 +385,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMembers(prev => prev.filter(m => m.id !== memberId));
   };
 
+  const leaveWorkspace = async (workspaceId: string) => {
+    await dbApi.leaveWorkspace(workspaceId);
+    const updated = await dbApi.getWorkspaces();
+    setWorkspaces(updated);
+    if (updated.length > 0) {
+      setActiveWorkspaceState(updated[0]);
+      await loadWorkspaceData(updated[0].id);
+    } else {
+      setActiveWorkspaceState(null);
+    }
+  };
+
   // ══════════════════════════════════════════════════════════════════
   // DOCUMENT UPLOAD + DELETE
   // ══════════════════════════════════════════════════════════════════
@@ -658,7 +671,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       workspaces, activeWorkspace, setActiveWorkspace, addWorkspace, updateWorkspaceDetails, deleteAllWorkspaceDocuments, deleteWorkspace,
-      members: activeWorkspaceMembers, addMember, updateMemberRole, removeMember,
+      members: activeWorkspaceMembers, addMember, updateMemberRole, removeMember, leaveWorkspace,
       currentUser, userRole, setUserRole,
       documents, uploadDocument, deleteDocument, reprocessDocument,
       chatSessions: activeWorkspace ? chatSessions.filter(s => s.workspaceId === activeWorkspace.id) : [],

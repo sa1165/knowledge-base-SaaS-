@@ -213,7 +213,7 @@ ${modeInstruction}`;
 
 // ── Call Groq API with specific key ──────────────────────────────────────────
 async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): Promise<{ answer: string; model: string }> {
-  const model = 'llama-3.3-70b-versatile';
+  const model = 'openai/gpt-oss-120b';
   const response = await fetchWithTimeout(
     'https://api.groq.com/openai/v1/chat/completions',
     {
@@ -248,7 +248,7 @@ async function callGroqAPI(apiKey: string, query: string, contexts: ContextItem[
 
 // ── Call Gemini API Fallback ──────────────────────────────────────────────────
 async function callGeminiAPI(apiKey: string, query: string, contexts: ContextItem[], history: HistoryItem[] = [], isExpertMode = false): Promise<{ answer: string; model: string }> {
-  const model = 'gemini-1.5-flash';
+  const model = 'gemini-3.8-flash';
   const prompt = `${buildSystemPrompt(isExpertMode)}\n\n${buildUserMessage(query, contexts, history, isExpertMode)}`;
 
   const response = await fetchWithTimeout(
